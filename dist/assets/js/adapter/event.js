@@ -32,8 +32,11 @@ export const Events = {
 
         JOIN_ROOM: 'ws:join_room',
         LEAVE_ROOM: 'ws:leave_room',
+        CLEAN_ROOM: 'ws:clean_room', // body: room id — deletes the messages and files of the room on the server and on all members
+        ROOM_CLEANED: 'ws:room_cleaned', // body: {id, timestamp} — another member cleaned the room
         SUBSCRIBE_PUSH: 'ws:subscribe_push',
-        ROOM_INFO: 'ws:room_info', // body: {id, ttl} — the TTL the server enforces for the room
+        ROOM_INFO: 'ws:room_info', // body: {id, ttl, store, joinSecret} — the TTL and store setting the server enforces for the room
+        JOIN_REJECTED: 'ws:join_rejected', // body: {id, reason} — the join code was missing, wrong, expired or used
         CONNECTED: 'ws:connected', // emitted after every (re)connect, once all rooms are joined again
         READY: 'ws:ready' // emitted once after the first successful connection
     },
@@ -53,9 +56,12 @@ export const Events = {
         UPDATE_ACTIVE_ROOM: 'chat:update_active_room',
         LEAVE_ACTIVE_ROOM: 'chat:leave_active_room',
         LEAVE_ACTIVE_ROOM_ASK: 'chat:leave_active_room_ask',
-        CLEAN_ACTIVE_ROOM: 'chat:clean_active_room',
-        CLEAN_ACTIVE_ROOM_ASK: 'chat:clean_active_room_ask',
+        CLEAN_ACTIVE_ROOM: 'chat:clean_active_room',             // deletes the messages on this device
+        CLEAN_ACTIVE_ROOM_SERVER: 'chat:clean_active_room_server', // on this device, the server and all members
+        ROOM_CLEANED: 'chat:room_cleaned',                         // body: room id — local messages deleted by ROOM_CLEANED
+        CLEAN_ACTIVE_ROOM_ASK: 'chat:clean_active_room_ask',       // opens the confirmation dialog
         COPY_ACTIVE_ROOM: 'chat:copy_active_room',
+        RENEW_SHARE_CODE: 'chat:renew_share_code', // new invite code in the share dialog
 
         MESSAGE_STORED: 'chat:message_stored',     // body: Message — a received message was saved in the database
         MESSAGES_EXPIRED: 'chat:messages_expired', // body: [{id, roomId}] removed from the database
@@ -89,6 +95,7 @@ export const Events = {
         OPEN: 'settings:open',                       // fills the settings modal
         CHANGE_PASSWORD: 'settings:change_password', // reads the password fields of the modal
         DARK_MODE: 'settings:dark_mode',             // body: the switch element (data-change)
+        LOGOFF_TIMER: 'settings:logoff_timer',       // body: the select element (data-change)
         CLEAN_IMAGES_ASK: 'settings:clean_images_ask', // opens the confirmation dialog
         CLEAN_IMAGES: 'settings:clean_images',       // deletes all locally stored images
         DELETE_ALL_ASK: 'settings:delete_all_ask',   // opens the confirmation dialog

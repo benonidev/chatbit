@@ -12,9 +12,11 @@ type WsMessageType string
 const (
 	WsTypeMessage             WsMessageType = "message"
 	WsTypeLeaveRoom           WsMessageType = "leave_rooms"
+	WsTypeCleanRoom           WsMessageType = "clean_room" // deletes all messages and files of a room on the server and on all members
 	WsTypeJoinRoom            WsMessageType = "join_rooms"
 	WsTypeHello               WsMessageType = "hello" // first frame of a connection: {clientUid}
 	WsTypeRoomInfo            WsMessageType = "room_info"
+	WsTypeJoinRejected        WsMessageType = "join_rejected" // the join code was missing, wrong, expired or used
 	WsTypeCreateRoom          WsMessageType = "create_room"
 	WsTypeSubscribePush       WsMessageType = "sub_push"
 	WsTypeFileTransferStart   WsMessageType = "transfer_start"

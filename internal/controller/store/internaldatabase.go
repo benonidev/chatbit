@@ -19,15 +19,22 @@ func NewAdapterInternal[T ObjectInternal](db Database[T]) *AdapterInternal[T] {
 
 	var prefix []byte
 
+	// Every type needs its own prefix, otherwise its keys mix with the keys of other types
 	switch any(obj).(type) {
 	case domain.Message:
-		prefix = convertUint16ToByte(PrefixRoom)
-	case domain.Room:
 		prefix = convertUint16ToByte(PrefixMessage)
+	case *domain.Room:
+		prefix = convertUint16ToByte(PrefixRoom)
+	case *domain.File:
+		prefix = convertUint16ToByte(PrefixFile)
 	case domain.Push:
 		prefix = convertUint16ToByte(PrefixPush)
 	case domain.Peer:
 		prefix = convertUint16ToByte(PrefixPeer)
+	case domain.UsedJoinCode:
+		prefix = convertUint16ToByte(PrefixUsedCode)
+	default:
+		panic(fmt.Sprintf("store: no key prefix for %T", obj))
 	}
 
 	return &AdapterInternal[T]{

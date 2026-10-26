@@ -24,8 +24,9 @@ export class Notification {
     }
 
     _notification(type, title, subtitle, msg, time) {
-        const appHeader = document.getElementById("appHeader") || document.body;
-        if (!appHeader) return;
+        // Not in #appHeader: a page change replaces the header and would remove a notification
+        // that was just shown (e.g. a rejected join that sends the user back home)
+        const container = document.body;
 
         if (!time) time = 3000;
 
@@ -33,7 +34,7 @@ export class Notification {
         if (subtitle) subtitleHtml = `<h3 class="subtitle">${subtitle}</h3>`
 
         // Close and remove previous notifications
-        const existingBoxes = appHeader.querySelectorAll(".notification-box");
+        const existingBoxes = container.querySelectorAll(".notification-box");
         existingBoxes.forEach((el) => {
             el.classList.remove("show");
             setTimeout(() => el.remove(), 300);
@@ -62,7 +63,7 @@ export class Notification {
         `.trim();
 
         const notificationBox = template.content.firstElementChild;
-        appHeader.appendChild(notificationBox);
+        container.appendChild(notificationBox);
 
         let autoCloseTimeout = null;
 

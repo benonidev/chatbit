@@ -20,6 +20,9 @@ type DB struct {
 	File    store.DBInternal[*domain.File]
 	Push    store.DBInternal[domain.Push]
 	Peer    store.DBInternal[domain.Peer]
+
+	// Join codes that were used already (kept until they expire)
+	UsedCode store.DBInternal[domain.UsedJoinCode]
 }
 
 type PS struct {
@@ -37,6 +40,8 @@ func NewApplication() *Application {
 			File:    store.NewAdapterInternal[*domain.File](database.NewAdapter[*domain.File](db)),
 			Push:    store.NewAdapterInternal[domain.Push](database.NewAdapter[domain.Push](db)),
 			Peer:    store.NewAdapterInternal[domain.Peer](database.NewAdapter[domain.Peer](db)),
+
+			UsedCode: store.NewAdapterInternal[domain.UsedJoinCode](database.NewAdapter[domain.UsedJoinCode](db)),
 		},
 		PS: PS{
 			Message: pubsub.NewAdapter[uuid.UUID, domain.Message](),

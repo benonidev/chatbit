@@ -6,9 +6,9 @@
             <ion-icon name="chevron-back-outline"></ion-icon>
         </a>
     </div>
-    <div class="pageTitle">
+    <div class="pageTitle room-title">
+        <div id="ro_room_ttl" class="room-ttl" title="Maximum lifetime of messages and Keep on Server"></div>
         <strong id="ro_room_name"></strong>
-        <div id="ro_room_ttl" class="room-ttl" title="Messages in this room are deleted after this time at the latest"></div>
     </div>
     <div class="right dropdown">
         <a href="#" class="headerButton" data-bs-toggle="dropdown" aria-expanded="false">
@@ -17,7 +17,7 @@
         <div class="dropdown-menu dropdown-menu-end" style="">
             <a class="dropdown-item" href="#" data-action="chat:edit_active_room"><i class="bi bi-pencil-square"></i> Edit</a>
             <a class="dropdown-item" href="#" data-action="chat:share_active_room"><ion-icon name="share-social-outline"></ion-icon> Share</a>
-            <a class="dropdown-item" href="#" data-action="chat:clean_active_room"><i class="bi bi-recycle"></i>Clean</a>
+            <a class="dropdown-item" href="#" data-action="chat:clean_active_room_ask"><i class="bi bi-recycle"></i> Clean</a>
             <a class="dropdown-item" href="#" data-action="chat:leave_active_room_ask"><i class="bi bi-door-open"></i> Leave</a>
         </div>
     </div>

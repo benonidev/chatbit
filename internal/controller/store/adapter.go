@@ -1,8 +1,10 @@
 package store
 
 const (
-	PrefixRoom    = uint16(0)
-	PrefixMessage = uint16(1)
-	PrefixPush    = uint16(2)
-	PrefixPeer    = uint16(3)
+	PrefixMessage  = uint16(0)
+	PrefixRoom     = uint16(1)
+	PrefixPush     = uint16(2)
+	PrefixPeer     = uint16(3)
+	PrefixUsedCode = uint16(4)
+	PrefixFile     = uint16(5)
 )

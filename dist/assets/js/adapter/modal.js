@@ -35,6 +35,7 @@ export const Modals = {
         SHARE_ROOM: "modal:room:share_room",
         EDIT_ROOM: "modal:room:edit_room",
         LEAVE_ROOM: "modal:room:leave_room",
+        CLEAN_ROOM: "modal:room:clean_room",
     },
     HOME: {
         JOIN_ROOM: "modal:home:join_room",

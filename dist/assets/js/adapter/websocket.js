@@ -25,11 +25,14 @@ const FILE_UPLOAD_ATTEMPTS = 3;
 //   Events.WS.READY                    — first successful connection after unlock
 //   Events.WS.RECEIVED_MESSAGE (Message) — message received from the server
 //   Events.WS.RECEIVED_FILE    (File)    — assembled binary transfer
+//   Events.WS.ROOM_CLEANED     ({id, timestamp}) — another member cleaned the room
+//   Events.WS.JOIN_REJECTED    ({id, reason})    — no valid join code for the room
 export class WebSocketAdapter {
-    constructor(events, db) {
+    constructor(events, db, keyStore) {
         this.conn = null;
         this._events = events;
         this._db = db;
+        this._keyStore = keyStore; // member codes for joining the rooms
 
         // Connection state
         this._profile = null;
@@ -84,6 +87,11 @@ export class WebSocketAdapter {
         // body: room id
         this._events.on(Events.WS.LEAVE_ROOM, async (roomId) => {
             this.leaveRooms({rooms: [roomId]});
+        });
+
+        // body: room id
+        this._events.on(Events.WS.CLEAN_ROOM, async (roomId) => {
+            this.cleanRoom({id: roomId});
         });
 
         this._events.on(Events.WS.TRANSFER_REQUEST, async (msg) => {
@@ -192,8 +200,16 @@ export class WebSocketAdapter {
         const rooms = await this._db.getRooms();
         const lastTimeStamp = await this._db.getLatestTimestamp();
 
+        const joins = [];
+        for (const r of rooms) {
+            joins.push({
+                id: r.id, notification: r.pushNotifications, ttl: r.ttl, store: r.store,
+                memberCode: await this._keyStore.memberCode(r.id, this._profile.clientId),
+            });
+        }
+
         this.joinRooms({
-            rooms: rooms.map(r => ({id: r.id, notification: r.pushNotifications, ttl: r.ttl})),
+            rooms: joins,
             lastConnectionTime: lastTimeStamp,
         });
     }
@@ -265,6 +281,10 @@ export class WebSocketAdapter {
         this._sendText("leave_rooms", msg);
     }
 
+    cleanRoom(msg) {
+        this._sendText("clean_room", msg);
+    }
+
     subscribePush(msg) {
         this._sendText("sub_push", msg);
     }
@@ -292,6 +312,12 @@ export class WebSocketAdapter {
                 break;
             case "room_info":
                 this._events.emit(Events.WS.ROOM_INFO, msg.data);
+                break;
+            case "join_rejected":
+                this._events.emit(Events.WS.JOIN_REJECTED, msg.data);
+                break;
+            case "clean_room":
+                this._events.emit(Events.WS.ROOM_CLEANED, msg.data);
                 break;
             case "transfer_ack":
                 this.resolveAck(msg.data.id, msg.data.chunk);

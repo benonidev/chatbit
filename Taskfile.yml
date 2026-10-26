@@ -4,6 +4,9 @@ vars:
   PROJECT_NAME: chatbit
   RESULTS: artifacts
 
+# PORTAINER_URL, PORTAINER_API_KEY, ... for deploy:portainer (.env is not committed)
+dotenv: [".env"]
+
 tasks:
   build:app:
     desc: Build ChatBit
@@ -33,6 +36,13 @@ tasks:
           -o {{ .RESULTS}}/{{.PROJECT_NAME }} \
           main.go
 
+  update:
+    desc: |
+      This task will update the version number in the codebase
+    cmds:
+      - task: build:docker
+      - task: deploy:portainer
+
   build:docker:
     cmds:
       - |
@@ -43,3 +53,50 @@ tasks:
           --build-arg="BUILD_BASE_IMAGE=golang:1.27-alpine" \
           .
         docker push registry.benoni.dev/chatbit:0.0.0-dev
+
+  deploy:portainer:
+    desc: Pull the newest image and recreate the container in Portainer
+    summary: |
+      Recreates the container with a freshly pulled image (a plain restart keeps the old image).
+      Portainer keeps the container configuration and uses the credentials of its registries.
+
+      Needs (environment or .env):
+        PORTAINER_URL          e.g. https://portainer.benoni.dev
+        PORTAINER_API_KEY      access token: My account → Access tokens
+        PORTAINER_ENDPOINT_ID  environment id, see the URL in Portainer (#!/<id>/docker/...), default 1
+        PORTAINER_CONTAINER    container name, default chatbit
+    # Do not print the commands, they contain the API key
+    silent: true
+    requires:
+      vars: [PORTAINER_URL, PORTAINER_API_KEY]
+    vars:
+      endpoint: '{{.PORTAINER_ENDPOINT_ID | default "1"}}'
+      container: '{{.PORTAINER_CONTAINER | default .PROJECT_NAME}}'
+    preconditions:
+      - sh: command -v jq
+        msg: "jq is needed to read the Portainer responses"
+    cmds:
+      - |
+        set -euo pipefail
+        api="{{.PORTAINER_URL}}/api"
+        auth="X-API-Key: {{.PORTAINER_API_KEY}}"
+
+        # The id changes with every recreate — look it up by the exact name
+        id=$(curl -sS --fail-with-body -H "$auth" -G \
+          --data-urlencode 'all=1' \
+          --data-urlencode 'filters={"name":["^/{{.container}}$"]}' \
+          "$api/endpoints/{{.endpoint}}/docker/containers/json" | jq -r '.[0].Id // empty')
+        if [ -z "$id" ]; then
+          echo "Container {{.container}} not found in environment {{.endpoint}}" >&2
+          exit 1
+        fi
+
+        echo "Recreating {{.container}} (${id:0:12}) with a freshly pulled image..."
+        new_id=$(curl -sS --fail-with-body -H "$auth" -H "Content-Type: application/json" \
+          -X POST -d '{"PullImage": true}' \
+          "$api/docker/{{.endpoint}}/containers/$id/recreate" | jq -r '.Id')
+
+        state=$(curl -sS --fail-with-body -H "$auth" \
+          "$api/endpoints/{{.endpoint}}/docker/containers/$new_id/json" \
+          | jq -r '"\(.State.Status) — \(.Config.Image) (\(.Image[7:19]))"')
+        echo "{{.container}} (${new_id:0:12}): $state"

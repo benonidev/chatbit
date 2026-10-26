@@ -6,6 +6,7 @@ import {Modals} from "./modal.js";
 import {Room} from "../domain/room.js";
 import {InviteCode} from "./invite.js";
 import {formatDuration, formatTTL, MESSAGE_TTL_STEPS, snapTTL} from "./expiry.js";
+import {inviteCode, joinWindow, joinWindowEnd} from "./join_code.js";
 import {idHue} from "./color.js";
 import {Notifications} from "./notification.js";
 
@@ -25,12 +26,13 @@ export class ViewRoom {
         this._roomTimestamp = null;
         this._roomKey = null;
         this._roomTTL = null;     // maximum TTL of the room (seconds), fixed when the room was created
-        this._sendTTL = 0;        // TTL of own messages (edit dialog "My messages"), 0 = room TTL
+        this._sendTTL = 0;        // TTL of own messages (edit dialog "Delete after"), 0 = room TTL
         this._roomName = null;
         this._roomStore = null;
         this._onRoomPage = false; // messages are only marked as read while the room is visible
         this._messageLoad = 0;    // incremented per message load of the room page
         this._shareFile = null; // image of the image modal, prepared for CHAT.SHARE_IMAGE
+        this._share = null;     // share dialog: {code, expires, render} of the shown invite code
         this._shareUrl = null;
         this._roomNotification = null;
 
@@ -72,6 +74,10 @@ export class ViewRoom {
 
         this._events.on(Events.CHAT.SHARE_ACTIVE_ROOM, async (msg) => {
             await this._shareRoom();
+        });
+
+        this._events.on(Events.CHAT.RENEW_SHARE_CODE, async () => {
+            await this._share?.render();
         });
 
         this._events.on(Events.CHAT.SEND_FILE, async (msg) => {
@@ -141,11 +147,31 @@ export class ViewRoom {
             this._events.emit(Events.CHANGE.PAGE, Pages.HOME);
         });
 
+        this._events.on(Events.CHAT.CLEAN_ACTIVE_ROOM_ASK, async (msg) => {
+            this._events.emit(Events.MODAL.OPEN, Modals.ROOM.CLEAN_ROOM);
+        });
+
         this._events.on(Events.CHAT.CLEAN_ACTIVE_ROOM, async (msg) => {
             console.log("Clean Active Room DB ID:", this._roomId);
             await this._db.cleanRoom(this._roomId);
             console.log("Clean Active Room");
             this._cleanActiveRoom();
+        });
+
+        // The server forwards the clean to the other members (offline ones get it on their next join)
+        this._events.on(Events.CHAT.CLEAN_ACTIVE_ROOM_SERVER, async (msg) => {
+            console.log("Clean Active Room everywhere:", this._roomId);
+            this._events.emit(Events.WS.CLEAN_ROOM, this._roomId);
+            await this._db.cleanRoom(this._roomId);
+            this._cleanActiveRoom();
+        });
+
+        // Another member cleaned the room — show what is left (messages newer than the clean)
+        this._events.on(Events.CHAT.ROOM_CLEANED, async (roomId) => {
+            if (roomId !== this._roomId || !this._onRoomPage) return;
+            this._cleanActiveRoom();
+            const loaded = await this._getLatestMessages();
+            if (loaded) this._scrollToBottom();
         });
 
         this._events.on(Events.CHAT.MESSAGE, async (msg) => {
@@ -159,11 +185,12 @@ export class ViewRoom {
             this._events.emit(Events.STATE.ROOM, roomId);
         })
 
-        // The server sends the TTL in force after every join — new messages use it
+        // The server sends the TTL and store setting in force after every join — new messages use them
         this._events.on(Events.WS.ROOM_INFO, (info) => {
             if (info.id !== this._roomId) return;
             this._roomTTL = info.ttl;
-            this._renderRoomTTL();
+            if (info.store !== undefined) this._roomStore = info.store;
+            this._renderRoomInfo();
         });
 
         // Delete time chosen in the timer menu of the chat footer
@@ -224,7 +251,7 @@ export class ViewRoom {
                 header.classList.add('room-color');
                 header.style.setProperty('--room-hue', hue);
                 document.getElementById('appContent').style.setProperty('--room-hue', hue);
-                this._renderRoomTTL();
+                this._renderRoomInfo();
 
                 this._cleanActiveRoom();
 
@@ -240,7 +267,6 @@ export class ViewRoom {
 
         const roomName = modalEl.querySelector('input[name="room_name"]');
         const roomNotification = modalEl.querySelector('input[name="room_notification"]');
-        const roomStore = modalEl.querySelector('input[name="room_store"]');
         const messageTTL = modalEl.querySelector('select[name="message_ttl"]');
 
         this._sendTTL = this._clampSendTTL(Number(messageTTL.value) || 0);
@@ -250,7 +276,7 @@ export class ViewRoom {
             name: await this._aes.encrypt(roomName.value, this._keyStore.getMasterKey()),
             key: await this._aes.encrypt(await this._aes.exportKey(this._roomKey), this._keyStore.getMasterKey()),
             pushNotifications: roomNotification.checked,
-            store: roomStore.checked,
+            store: this._roomStore, // fixed since the room was created, like the TTL
             ttl: this._roomTTL, // fixed since the room was created, the server ignores any other value
             messageTTL: this._sendTTL
         })
@@ -277,51 +303,83 @@ export class ViewRoom {
 
         roomMaxTTL.textContent = formatTTL(this._effectiveRoomTTL());
 
-        // Room maximum plus every fixed step that is shorter
+        // Room TTL plus every fixed step that is shorter
         const roomTTL = this._effectiveRoomTTL();
-        messageTTL.innerHTML = `<option value="0">Room maximum (${formatTTL(roomTTL)})</option>` +
+        messageTTL.innerHTML = `<option value="0">Max. lifetime (${formatTTL(roomTTL)})</option>` +
             MESSAGE_TTL_STEPS.filter(s => s < roomTTL)
                 .map(s => `<option value="${s}">${formatTTL(s)}</option>`).join("");
         messageTTL.value = String(this._sendTTL || 0);
     }
 
-    // Invite code of the open room, encrypted with the PIN if one is given
+    // Invite code of the open room with a new join code, encrypted with the PIN if one is given.
+    // Returns {code, expires}; expires is null if the room has no join secret (not connected to
+    // the server yet) — the server will not accept such a code.
     async _inviteCode(pin) {
-        return this._invite.encode({
+        const joinKey = await this._keyStore.getJoinKey(this._roomId);
+        const window = joinWindow();
+
+        const code = await this._invite.encode({
             i: this._roomId,
             n: this._roomName,
-            k: await this._aes.exportKey(this._roomKey)
+            k: await this._aes.exportKey(this._roomKey),
+            c: joinKey ? await inviteCode(joinKey, window) : "",
         }, pin);
+
+        return {code, expires: joinKey ? joinWindowEnd(window) : null};
     }
 
+    // Copies the code shown in the share dialog (a new one if it has expired)
     async _copySharedRoom(){
         const modalEl = document.getElementById(Modals.ROOM.SHARE_ROOM);
-
-        const pinInput = modalEl.querySelector('input[name="share_pin"]');
         const copyBtn = modalEl.querySelector('[data-field="copy_btn"]');
 
-        await navigator.clipboard.writeText(await this._inviteCode(pinInput.value));
+        if (!this._share) return;
+        if (this._share.expires !== null && Date.now() >= this._share.expires) await this._share.render();
+
+        await navigator.clipboard.writeText(this._share.code);
 
         const original = copyBtn.innerHTML;
         copyBtn.innerHTML = '<ion-icon name="checkmark-outline"></ion-icon> Copied!';
         setTimeout(() => { copyBtn.innerHTML = original; }, 2000);
     }
 
-    // The QR code contains exactly the invite code that "Copy Code" copies, so it can also be
-    // scanned with the native camera app and pasted into the join dialog.
+    // Share dialog: QR code with a join code that is valid once and for a few minutes. The
+    // countdown shows how long; an expired code is covered and can be renewed.
     async _shareRoom(){
         const modalEl = document.getElementById(Modals.ROOM.SHARE_ROOM);
 
         const qrContainer = modalEl.querySelector('[data-field="qr_code"]');
+        const expiredEl = modalEl.querySelector('[data-field="qr_expired"]');
+        const validityEl = modalEl.querySelector('[data-field="share_validity"]');
         const pinInput = modalEl.querySelector('input[name="share_pin"]');
 
         pinInput.value = "";
 
         let renderId = 0;
+
+        const tick = () => {
+            if (!this._share) return;
+            if (this._share.expires === null) {
+                validityEl.textContent = "Not usable yet — this room is not connected to the server";
+                expiredEl.classList.add("d-none");
+                return;
+            }
+
+            const left = this._share.expires - Date.now();
+            const expired = left <= 0;
+            expiredEl.classList.toggle("d-none", !expired);
+            validityEl.textContent = expired
+                ? "This code has expired"
+                : `Valid once, for ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")} min`;
+        };
+
+        // Every render creates a new join code
         const render = async () => {
             const id = ++renderId;
-            const code = await this._inviteCode(pinInput.value);
+            const {code, expires} = await this._inviteCode(pinInput.value);
             if (id !== renderId) return; // a newer render was started while deriving the PIN key
+
+            this._share = {code, expires, render};
 
             qrContainer.innerHTML = "";
             new QRCode(qrContainer, {
@@ -332,6 +390,7 @@ export class ViewRoom {
                 colorLight: "#fff",
                 correctLevel: QRCode.CorrectLevel.L // short code + low correction = large modules
             });
+            tick();
         };
 
         // White quiet zone around the code: scanners need it, especially in dark mode
@@ -340,14 +399,23 @@ export class ViewRoom {
         qrContainer.style.width = "fit-content";
         qrContainer.style.margin = "0 auto";
 
-        // Re-render with the PIN, debounced because the PIN key derivation (PBKDF2) is slow
+        // Re-render with the PIN, debounced because the PIN key derivation (PBKDF2) is slow.
+        // A PIN change gives a new join code as well — the shown one may already be scanned.
         let timer = null;
         pinInput.oninput = () => {
             clearTimeout(timer);
             timer = setTimeout(render, 400);
         };
 
+        this._share = null;
         await render();
+
+        const ticker = setInterval(tick, 1000);
+        modalEl.addEventListener("hidden.bs.modal", () => {
+            clearInterval(ticker);
+            clearTimeout(timer);
+            this._share = null;
+        }, {once: true});
 
         this._events.emit(Events.MODAL.OPEN, Modals.ROOM.SHARE_ROOM);
     }
@@ -732,9 +800,16 @@ export class ViewRoom {
     }
 
     // Room TTL under the room name, e.g. "⏱ max 1 h"
-    _renderRoomTTL() {
+    // Header line under the room name: maximum lifetime and whether messages are kept on the server
+    _renderRoomInfo() {
         const el = document.getElementById('ro_room_ttl');
-        if (el) el.innerHTML = `<ion-icon name="timer-outline"></ion-icon> max ${formatTTL(this._effectiveRoomTTL())}`;
+        if (!el) return;
+
+        const store = this._roomStore
+            ? `<span class="room-store" title="Keep on Server: messages are kept encrypted on the server"><ion-icon name="cloud-done-outline"></ion-icon> server</span>`
+            : `<span class="room-store" title="Keep on Server is off: only members who are online receive messages"><ion-icon name="cloud-offline-outline"></ion-icon> live only</span>`;
+
+        el.innerHTML = `<ion-icon name="timer-outline"></ion-icon> max ${formatTTL(this._effectiveRoomTTL())}${store}`;
     }
 
 

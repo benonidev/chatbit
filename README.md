@@ -31,8 +31,13 @@ or QR code that carries the room key.
 - **No accounts** — local profile protected by a password (PBKDF2, 600 000 iterations)
 - **Invite by QR code or code** — compact invite codes (`CB1-…`), optionally protected with a PIN;
   the QR code can also be scanned with the native camera app and pasted
+- **One-time invites** — every invite carries a join code that the server accepts **once** and only
+  for 5–10 minutes; the share dialog shows a countdown and renews an expired code. A used or
+  expired invite is rejected with a notification
 - **Fast QR scanner** — native `BarcodeDetector` where available, zxing-cpp (WebAssembly) on iOS and Firefox
-- **Images** — encrypted, chunked upload over the WebSocket with retry
+- **Images and documents** — any file, encrypted and uploaded in chunks over the WebSocket with retry
+- **Store setting per room** — keep messages encrypted on the server for members who are offline,
+  or deliver them only to members who are online right now (set once when the room is created)
 - **Self-deleting messages** — every room has a maximum TTL that is set once when it is created and
   enforced by the server; single messages can be sent with a shorter TTL. Expired messages are
   deleted on the server and on every device (checked every minute), the remaining time is shown
@@ -40,6 +45,10 @@ or QR code that carries the room key.
 - **Offline-capable PWA** — installable, cached app shell, automatic update notice
 - **Web Push** — notifications for new messages (VAPID)
 - **Reliable connection** — automatic reconnect with exponential backoff, outbox for messages sent while offline
+- **Settings** — change the password, light / dark mode, storage usage with image clean up,
+  delete all local data, app version info
+- **Auto log off** — after 30 min, 2 h, 6 h or 12 h without interaction the keys are dropped from
+  memory and the lock screen is shown (time in the background counts as well)
 
 ## How It Works
 
@@ -71,12 +80,16 @@ flowchart LR
 1. **Profile** — on first start the user picks an alias and a password. A master key is derived
    with PBKDF2 and only kept in memory; room keys are stored in IndexedDB encrypted with it.
 2. **Room** — creating a room generates a random AES-256 key in the browser.
-3. **Invite** — the room id, key and name are packed into an invite code / QR code
-   (optionally encrypted with a PIN) and shared out of band.
-4. **Messages** — text and images are encrypted with the room key and sent over the WebSocket.
+3. **Invite** — the room id, key, name and a one-time join code are packed into an invite code /
+   QR code (optionally encrypted with a PIN) and shared out of band.
+4. **Join** — the server only lets a client into a room with a valid, unused join code. After an
+   accepted join it answers with `room_info`, which contains the join secret, so the new member
+   can create its own codes from then on.
+5. **Messages** — text and files are encrypted with the room key and sent over the WebSocket.
    The server forwards them to everyone in the room, stores them with a TTL and sends a push
    notification to subscribed members.
-5. **Reconnect** — after a reconnect the client rejoins its rooms and receives the messages it missed.
+6. **Reconnect** — after a reconnect the client rejoins its rooms with fresh member codes and
+   receives the messages it missed.
 
 ```mermaid
 sequenceDiagram
@@ -84,10 +97,14 @@ sequenceDiagram
     participant S as ChatBit server
     participant B as Bob (PWA)
 
-    A->>A: create room, generate AES key
+    A->>S: join_rooms [new room id]
+    S->>S: create room + join secret
+    S-->>A: room_info (ttl, store, join secret)
+    A->>A: invite code = id + key + name + join code
     A-->>B: invite code / QR code (out of band)
-    B->>S: join_rooms [room id, last seen]
-    S-->>B: missed messages (ciphertext)
+    B->>S: join_rooms [room id, inviteCode]
+    S->>S: check join code, mark as used
+    S-->>B: room_info + missed messages (ciphertext)
     A->>A: encrypt message with room key
     A->>S: message (ciphertext, ttl)
     S->>S: store with TTL
@@ -95,6 +112,37 @@ sequenceDiagram
     S-)B: web push (if subscribed)
     B->>B: decrypt with room key
 ```
+
+### Join codes
+
+Join codes prove to the server that a client may join a room, without the server ever seeing the
+room key. Both kinds are derived from the room's join secret with HMAC-SHA256 over a 5 minute
+time window and a random nonce (`internal/domain/joincode.go`, `dist/assets/js/adapter/join_code.js`):
+
+| Code        | Derived from                                   | Used by                                         |
+|-------------|------------------------------------------------|-------------------------------------------------|
+| invite code | `invite:<window>:<nonce>`                      | new members, from the invite QR code            |
+| member code | `member:<window>:<clientUid>:<nonce>`          | existing members on every (re)join, bound to their client id |
+
+```mermaid
+flowchart TD
+    J[join_rooms for a room] --> E{room exists?}
+    E -->|no| C[create room<br/>+ new join secret]
+    C --> OK
+    E -->|yes| M{valid member code<br/>for this client?}
+    M -->|yes| U{code used before?}
+    M -->|no| I{valid invite code?}
+    I -->|yes| U
+    I -->|no| R
+    U -->|no| MARK[store hash of code<br/>TTL 15 min] --> OK
+    U -->|yes| R
+    OK[add peer, subscribe] --> INFO[room_info + missed messages]
+    R[join_rejected] --> N[client removes a freshly joined room<br/>and shows a notification]
+```
+
+A code is accepted in the window before, during and after the current one (clock drift), so it
+lives 5–10 minutes. Used codes are stored only as a hash of room id and code until they could
+no longer be valid anyway.
 
 ## Getting Started
 
@@ -183,7 +231,7 @@ Data written to the working directory:
 
 | Path             | Content                                 |
 |------------------|-----------------------------------------|
-| `chatbit_db.kv/` | Badger database (messages, rooms, push subscriptions) |
+| `chatbit_db.kv/` | Badger database (messages, rooms, push subscriptions, hashes of used join codes) |
 | `vapid.json`     | Generated VAPID keys (if not set via env) |
 | `files/`         | Uploaded encrypted files, one folder per room (if `IMAGE_TMP_DIR` is not set) |
 
@@ -256,7 +304,7 @@ install the new version in the background and show an update notice.
 ├── main.go                     # entry point: message TTL, VAPID keys, server start
 ├── internal/
 │   ├── core/                   # application wiring (DB, pub/sub)
-│   ├── domain/                 # Message, Room, Peer, File, WebSocket message types
+│   ├── domain/                 # Message, Room, Peer, File, join codes, WebSocket message types
 │   ├── port/                   # HTTP file server, WebSocket hub, file transfer
 │   ├── adapter/                # badger database, pub/sub, VAPID / web push
 │   └── controller/store/       # generic KV store with TTL
@@ -267,7 +315,7 @@ install the new version in the background and show an update notice.
 │   └── assets/
 │       ├── js/
 │       │   ├── app.js          # composition root
-│       │   ├── adapter/        # aes, database, websocket, views, scanner, invite, push, …
+│       │   ├── adapter/        # aes, database, websocket, views, scanner, invite, join codes, log off, push, …
 │       │   ├── domain/         # Message, Room, File, Profile
 │       │   └── lib/            # Bootstrap, Dexie, qrcode.js, zxing-wasm
 │       └── view/               # page templates (header/content)
@@ -280,12 +328,32 @@ install the new version in the background and show an update notice.
 
 All frames on `/ws` are JSON with a `type` field; file chunks are sent as binary frames.
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: hello {clientUid}
+    C->>S: join_rooms {rooms: [{id, memberCode | inviteCode}], lastConnectionTime}
+    alt code valid and unused
+        S-->>C: room_info {id, ttl, store, joinSecret}
+        S-->>C: clean_room (if cleaned while offline)
+        S-->>C: message … (missed since lastConnectionTime)
+    else missing, wrong, expired or used
+        S-->>C: join_rejected {id, reason: "code"}
+    end
+    C->>S: message (ciphertext)
+    S-->>C: message (from other members)
+```
+
 | Type               | Direction        | Purpose                                         |
 |--------------------|------------------|-------------------------------------------------|
 | `hello`            | client → server  | first frame of every connection: `{clientUid}` (not in the URL, so it is not in proxy logs) |
-| `join_rooms`       | client → server  | subscribe to rooms, request missed messages; the TTL is only used when the room is created |
-| `room_info`        | server → client  | TTL in force for a joined room                  |
+| `join_rooms`       | client → server  | subscribe to rooms with a member or invite code, request missed messages; TTL and store setting are only used when the room is created |
+| `join_rejected`    | server → client  | no valid join code for a room (missing, wrong, expired or used) |
+| `room_info`        | server → client  | TTL, store setting and join secret of a joined room |
 | `leave_rooms`      | client → server  | unsubscribe from rooms                          |
+| `clean_room`       | both             | delete all messages and files of a room on the server (members only); forwarded to all members, offline members get it on their next join |
 | `create_room`      | client → server  | register a new room (never overwrites an existing one) |
 | `message`          | both             | encrypted message                               |
 | `sub_push`         | client → server  | store a web push subscription                   |
@@ -301,19 +369,30 @@ All frames on `/ws` are JSON with a `type` field; file chunks are sent as binary
   size reveals little; the image type is encrypted as well. A shorter message TTL can only be one
   of a few fixed steps, so it does not mark the messages of one person.
 - Messages and files can not be overwritten: the server only accepts ids that do not exist yet.
+- **Join codes:** every room has a join secret on the server, members get it with `room_info`.
+  Every join needs a new code derived from it (HMAC, 5 minute windows, random nonce): members
+  send a code bound to their client id, new members the code from the invite QR code. Every
+  code works **once** (used codes are kept as hashes in the database until they expire) and
+  expires after 5–10 minutes. An old or used invite code is useless for the server — but it
+  still contains the room key. Rooms from before join codes can not be joined anymore. The
+  join secret can not be changed yet, so a member who left can still create invite codes.
+- **Auto log off** drops the master key and room keys from memory; the data in IndexedDB stays
+  encrypted with the password.
 - **Whoever has an invite code has the room key.** Share codes over a trusted channel and use a
-  PIN when the channel is not trusted. Invite codes do not expire, and a member who has joined
-  keeps the key — there is no key rotation yet.
+  PIN when the channel is not trusted. A member who has joined keeps the key — there is no key
+  rotation yet.
 - The password protects the local profile. It cannot be recovered; forgetting it means losing
   access to the stored rooms on that device.
 
 ## Roadmap
 
 - [ ] Online / offline status of users
-- [ ] Expiring and one-time invite codes (server-side invite token with TTL)
+- [x] Expiring and one-time invite codes (join codes)
+- [x] Room access proof — only clients with a valid join code can join
+- [ ] Join secret rotation when a member leaves
 - [ ] Room key rotation
 - [ ] Configurable listen port
-- [ ] Room access proof (only clients with the room key can join) and session ids instead of a fixed client id
+- [ ] Session ids instead of a fixed client id
 
 ## License
 

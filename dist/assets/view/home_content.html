@@ -132,23 +132,44 @@
                                 <ul class="listview simple-listview">
 
                                     <li>
-                                        <div style="text-align: left" >Push Notifications</div>
+                                        <div style="text-align: left">
+                                            Push Notifications
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#in_info_new_room_push" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
                                         <div class="form-check form-switch">
                                             <input class="form-check-input" type="checkbox" id="in_new_room_push" checked>
                                             <label class="form-check-label" for="in_new_room_push"></label>
                                         </div>
                                     </li>
+                                    <li class="collapse text-muted small" id="in_info_new_room_push">
+                                        You get a notification when a new message arrives while the app is closed. It never shows the content or the sender.
+                                    </li>
 
                                     <li>
-                                        <div style="text-align: left" >Cloud Store</div>
+                                        <div style="text-align: left">
+                                            Keep on Server
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#in_info_new_room_store" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
                                         <div class="form-check form-switch">
                                             <input class="form-check-input" type="checkbox" id="in_new_room_store" checked>
                                             <label class="form-check-label" for="in_new_room_store"></label>
                                         </div>
                                     </li>
+                                    <li class="collapse text-muted small" id="in_info_new_room_store">
+                                        Your messages and files are kept encrypted on the server until their lifetime ends, so members who are offline still get them later. When off, only members who are online right now receive them. It is set when the room is created and can not be changed.
+                                    </li>
 
                                     <li class="row" id="in_new_room_ttl_row">
-                                        <div style="text-align: left" class="col-6" > - Delete After</div>
+                                        <div style="text-align: left" class="col-6">
+                                            Max. lifetime
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#in_info_new_room_ttl" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
                                         <div class="col-3 input-wrapper">
                                             <input style="text-align: center" class="form-control" type="number" id="in_new_room_ttl" value="0">
                                         </div>
@@ -160,11 +181,11 @@
                                             </select>
                                         </div>
                                     </li>
+                                    <li class="collapse text-muted small" id="in_info_new_room_ttl">
+                                        Messages in this room are deleted after this time at the latest (0 = 30 days, the maximum).
+                                        It can only be set now and not changed later.
+                                    </li>
                                 </ul>
-                                <div class="text-muted small mt-1">
-                                    Messages are deleted after this time (0 = 30 days, the maximum).
-                                    It can only be set now and not changed later.
-                                </div>
 
 
                             <div class="mt-2">
@@ -288,6 +309,20 @@
                     </li>
                 </ul>
 
+                <div class="listview-title mt-2">Security</div>
+                <ul class="listview simple-listview">
+                    <li>
+                        <label for="in_settings_logoff" class="mb-0">Log off when inactive</label>
+                        <select class="form-control w-auto" id="in_settings_logoff" data-change="settings:logoff_timer">
+                            <option value="0">Never</option>
+                            <option value="30">after 30 min</option>
+                            <option value="120">after 2 h</option>
+                            <option value="360">after 6 h</option>
+                            <option value="720">after 12 h</option>
+                        </select>
+                    </li>
+                </ul>
+
                 <div class="listview-title mt-2">Password</div>
                 <form class="section" onsubmit="event.preventDefault();">
                     <div class="form-group basic">
@@ -376,7 +411,7 @@
                 <h5 class="modal-title">Delete Images</h5>
             </div>
             <div class="modal-body">
-                Delete all downloaded images and documents on this device? Files of rooms with Cloud Store can be downloaded again while their message exists, files of other rooms are gone for good.
+                Delete all downloaded images and documents on this device? Files of rooms with Keep on Server can be downloaded again while their message exists, files of other rooms are gone for good.
             </div>
             <div class="modal-footer">
                 <div class="btn-list">

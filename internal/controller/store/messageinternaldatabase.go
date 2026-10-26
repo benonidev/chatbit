@@ -19,7 +19,7 @@ func NewMessageAdapterInternal[T ObjectMessageInternal](db DatabaseTs[T]) *Messa
 }
 
 func (aI *MessageAdapterInternal[T]) GetAllSinceTimeStamp(roomID uuid.UUID, timestamp uint64) ([]T, error) {
-	prefix := append(convertUint16ToByte(PrefixRoom), roomID[:]...)
+	prefix := append(convertUint16ToByte(PrefixMessage), roomID[:]...)
 
 	objArr, err := aI.db.GetObjectsByPrefixAndSinceTs(prefix, timestamp)
 	if err != nil {
@@ -28,6 +28,15 @@ func (aI *MessageAdapterInternal[T]) GetAllSinceTimeStamp(roomID uuid.UUID, time
 
 	return objArr, nil
 }
+
+// DeleteAll removes every stored message of the room.
 func (aI *MessageAdapterInternal[T]) DeleteAll(roomID uuid.UUID) error {
+	prefix := append(convertUint16ToByte(PrefixMessage), roomID[:]...)
+
+	err := aI.db.DeleteObjectsByPrefix(prefix)
+	if err != nil {
+		return fmt.Errorf("not possible to delete messages of room: %w", err)
+	}
+
 	return nil
 }

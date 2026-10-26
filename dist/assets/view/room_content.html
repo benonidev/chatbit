@@ -54,10 +54,23 @@
                 <div class="login-form">
                     <div class="section mt-2">
                         <h1>Share Room</h1>
-                        <h4>Scan QR Code to join this Chat</h4>
+                        <h4>Scan QR Code to join this Chat. Each code works once — tap "New code" for the next person.</h4>
                     </div>
                     <div class="section mt-4 mb-5">
-                        <div data-field="qr_code" style="display: flex; justify-content: center;"></div>
+                        <div class="qr-wrapper">
+                            <div data-field="qr_code" style="display: flex; justify-content: center;"></div>
+                            <!-- shown when the join code of the QR code has expired -->
+                            <div data-field="qr_expired" class="qr-expired d-none">
+                                <div class="mb-2">Code expired</div>
+                                <button type="button" class="btn btn-primary" data-action="chat:renew_share_code">
+                                    <ion-icon name="refresh-outline"></ion-icon> New Code
+                                </button>
+                            </div>
+                        </div>
+                        <div class="text-center text-muted small mt-2">
+                            <span data-field="share_validity"></span>
+                            · <a href="#" data-action="chat:renew_share_code">New code</a>
+                        </div>
                         <div class="form-group basic mt-3">
                             <div class="input-wrapper">
                                 <label class="form-label" for="ct_share_pin">PIN (optional)</label>
@@ -77,6 +90,35 @@
     </div>
 </div>
 <!-- * Modal Share Room -->
+
+    <!-- Clean Room-->
+    <div class="modal fade dialogbox" id="modal:room:clean_room" data-bs-backdrop="static" tabindex="-1" style="display: none;">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Clear Chat</h5>
+                </div>
+                <div class="modal-body">
+                    Delete all messages and files of this room?
+                </div>
+                <div class="modal-footer">
+                    <div class="btn-list">
+                        <a href="#" class="btn btn-text-danger btn-block" data-bs-dismiss="modal" data-action="chat:clean_active_room">
+                            <i class="bi bi-phone"></i>
+                            ON THIS DEVICE
+                        </a>
+                        <a href="#" class="btn btn-text-danger btn-block" data-bs-dismiss="modal" data-action="chat:clean_active_room_server">
+                            <i class="bi bi-people"></i>
+                            FOR ALL MEMBERS
+                        </a>
+                        <a href="#" class="btn btn-text-primary btn-block" data-bs-dismiss="modal">
+                            CANCEL
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Leave Room-->
     <div class="modal fade dialogbox" id="modal:room:leave_room" data-bs-backdrop="static" tabindex="-1" style="display: none;">
@@ -134,39 +176,69 @@
 
                                 <ul class="listview simple-listview">
                                     <li>
-                                        <div>Push Notifications</div>
+                                        <div style="text-align: left">
+                                            Push Notifications
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#ct_info_room_push" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
                                         <div class="form-check form-switch">
                                             <input class="form-check-input" type="checkbox" id="ct_edit_room_push" name="room_notification">
                                             <label class="form-check-label" for="ct_edit_room_push"></label>
                                         </div>
                                     </li>
+                                    <li class="collapse text-muted small" id="ct_info_room_push">
+                                        You get a notification when a new message arrives while the app is closed. It never shows the content or the sender.
+                                    </li>
                                     <li>
-                                        <div style="text-align: left">Cloud Store</div>
+                                        <div style="text-align: left">
+                                            Keep on Server
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#ct_info_room_store" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
                                         <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" id="ct_edit_room_store" name="room_store">
+                                            <input class="form-check-input" type="checkbox" id="ct_edit_room_store" name="room_store" disabled>
                                             <label class="form-check-label" for="ct_edit_room_store"></label>
                                         </div>
                                     </li>
-
-                                    <!-- Room maximum: fixed when the room was created -->
-                                    <li>
-                                        <div style="text-align: left">Room maximum</div>
-                                        <div><ion-icon name="timer-outline"></ion-icon> <span data-field="room_max_ttl"></span></div>
+                                    <li class="collapse text-muted small" id="ct_info_room_store">
+                                        Your messages and files are kept encrypted on the server until their lifetime ends, so members who are offline still get them later. When off, only members who are online right now receive them. It is set when the room is created and can not be changed.
                                     </li>
 
-                                    <!-- Delete time of own messages, at most the room maximum -->
+                                    <!-- Room TTL: fixed when the room was created -->
+                                    <li>
+                                        <div style="text-align: left">
+                                            Max. lifetime
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#ct_info_room_ttl" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
+                                        <div><ion-icon name="timer-outline"></ion-icon> <span data-field="room_max_ttl"></span></div>
+                                    </li>
+                                    <li class="collapse text-muted small" id="ct_info_room_ttl">
+                                        Messages in this room are deleted after this time at the latest.
+                                        It is set when the room is created and can not be changed.
+                                    </li>
+
+                                    <!-- Delete time of own messages, at most the room TTL -->
                                     <li class="row" id="ct_edit_room_ttl_row">
-                                        <div style="text-align: left" class="col-6">My messages</div>
+                                        <div style="text-align: left" class="col-6">
+                                            Delete after
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#ct_info_message_ttl" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
                                         <div class="col-6 input-wrapper">
-                                            <!-- options are filled by _fillEditRoomModal: room maximum + the fixed steps below it -->
+                                            <!-- options are filled by _fillEditRoomModal: room TTL + the fixed steps below it -->
                                             <select class="form-control" id="ct_edit_room_ttl" name="message_ttl"></select>
                                         </div>
                                     </li>
+                                    <li class="collapse text-muted small" id="ct_info_message_ttl">
+                                        Your own messages are deleted after this time — earlier than the room allows, if you like.
+                                        Only fixed steps are offered — an individual time would make your messages recognizable to the server.
+                                    </li>
                                 </ul>
-                                <div class="text-muted small mt-1">
-                                    The room maximum is set when the room is created and can not be changed.
-                                    Your messages can be deleted earlier. Only fixed steps are offered — an individual time would make your messages recognizable to the server.
-                                </div>
 
                                 <div class="mt-2">
                                     <button type="button" class="btn btn-primary btn-block btn-lg" data-action="chat:update_active_room">Update Room</button>

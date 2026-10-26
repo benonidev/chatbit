@@ -1,7 +1,6 @@
 
     <div id="appCapsule" class="pt-0">
-        <div class="login-form mt-1">
-            <br><br>
+        <div class="login-form login-page mt-1">
             <div class="section">
                 <!-- logo per theme, switched by the CSS (.logo-for-dark / .logo-for-light) -->
                 <img src="assets/img/LogoBenoni.svg" alt="image" class="form-image logo-for-dark">
@@ -10,8 +9,7 @@
             <br>
             <div class="section mt-1">
                 <h1>ChatBit</h1>
-                <h4>Fill the register form to log in</h4>
-                <p>User management is performed exclusively on the local device. <br>No credentials — including alias or passwords — are transmitted to any server at any time.</p>
+                <h4>End-to-end encrypted.</h4>
             </div>
             <div class="section mt-1 mb-5">
                 <form id="login_submit" onsubmit="app.register(this); return false;">
@@ -38,6 +36,12 @@
                     </div>
 
                 </form>
+
+                <!-- privacy note: below the form, only as additional information -->
+                <div class="login-info">
+                    <ion-icon name="lock-closed-outline"></ion-icon>
+                    <span>Your profile is stored only on this device.</span>
+                </div>
             </div>
         </div>
     </div>

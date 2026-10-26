@@ -13,6 +13,7 @@ import {Notification, Notifications} from "./adapter/notification.js";
 import {Push} from "./adapter/push.js";
 import {Expiry} from "./adapter/expiry.js";
 import {ViewSettings} from "./adapter/view_settings.js";
+import {LogoffTimer} from "./adapter/logoff.js";
 
 // Composition root: creates all adapters and views, wires them to one shared
 // EventBus and decides which page is shown on startup (login, lock or home).
@@ -21,8 +22,8 @@ export class App {
         this.events = new EventBus();
         this.aes = new AesAdapter();
         this.db = new DatabaseAdapter(this.aes, this.events);
-        this.ws = new WebSocketAdapter(this.events, this.db);
-        this.keyStore = new KeyStore(this.aes, this.db);
+        this.keyStore = new KeyStore(this.aes, this.db, this.events);
+        this.ws = new WebSocketAdapter(this.events, this.db, this.keyStore);
         this.page = new Page(this.events);
         this.viewLock = new ViewLock(this.events, this.keyStore, this.db);
         this.viewHome = new ViewHome(this.events, this.aes, this.keyStore, this.db, new QRScanner());
@@ -32,12 +33,14 @@ export class App {
         this.push = new Push(this.events);
         this.expiry = new Expiry(this.events, this.db);
         this.viewSettings = new ViewSettings(this.events, this.keyStore, this.db, this.ws);
+        this.logoffTimer = new LogoffTimer(this.events, this.keyStore);
     }
 
     async init() {
         console.log("App init");
         await this.db.init();
         await this.page.init();
+        this.keyStore.init();
         this.ws.init();
         this.viewLock.init();
         this.viewHome.init();
@@ -47,6 +50,7 @@ export class App {
         await this.push.init();
         this.expiry.init();
         this.viewSettings.init();
+        this.logoffTimer.init();
 
         await this._checkIsUserLoggedIn();
 

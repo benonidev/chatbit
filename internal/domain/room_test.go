@@ -47,3 +47,28 @@ func TestRoomSetTTLOnce(t *testing.T) {
 	assert.Equal(t, domain.MaxMessageTTL, r2.SetTTLOnce(0))
 	assert.Equal(t, domain.MaxMessageTTL, r2.SetTTLOnce(60))
 }
+
+func TestRoomSetStoreOnce(t *testing.T) {
+	on, off := true, false
+
+	r := &domain.Room{}
+	assert.Nil(t, r.SetStoreOnce(nil), "no setting from the client → still unset")
+	assert.True(t, *r.SetStoreOnce(&on))
+	// A second value is ignored — the setting can only be set once
+	assert.True(t, *r.SetStoreOnce(&off))
+
+	r2 := &domain.Room{}
+	assert.False(t, *r2.SetStoreOnce(&off))
+	assert.False(t, *r2.SetStoreOnce(&on))
+}
+
+func TestRoomStoreMessages(t *testing.T) {
+	on, off := true, false
+
+	assert.True(t, (&domain.Room{Store: &on}).StoreMessages(false), "room setting wins")
+	assert.False(t, (&domain.Room{Store: &off}).StoreMessages(true), "room setting wins")
+
+	legacy := &domain.Room{}
+	assert.True(t, legacy.StoreMessages(true), "room without setting → message decides")
+	assert.False(t, legacy.StoreMessages(false))
+}

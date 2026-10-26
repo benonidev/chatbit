@@ -4,10 +4,11 @@
 
 export class Room {
 
-    constructor({ id, name, key, pushNotifications, store, ttl, messageTTL, lastRead }) {
+    constructor({ id, name, key, joinSecret, pushNotifications, store, ttl, messageTTL, lastRead }) {
         this.id                = id;
         this.name              = name;              // decrypted
         this.key               = key;              // encrypted base64 — only KeyStore uses this
+        this.joinSecret        = joinSecret;       // encrypted base64, from the server — only KeyStore uses this
         this.pushNotifications = pushNotifications ?? false;
         this.store             = store ?? false;
         this.ttl               = ttl ?? 0;         // room maximum (seconds), fixed by the server
@@ -25,6 +26,7 @@ export class Room {
             id:                row.id,
             name:              row.name,
             key:               row.key,
+            joinSecret:        row.joinSecret,
             pushNotifications: row.pushNotifications,
             store:             row.store,
             ttl:               row.ttl,
@@ -42,6 +44,7 @@ export class Room {
             id:                 this.id,
             name:               this.name,
             key:                this.key,
+            joinSecret:         this.joinSecret,
             pushNotifications: this.pushNotifications,
             store:              this.store,
             ttl:                this.ttl,

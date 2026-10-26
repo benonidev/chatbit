@@ -16,10 +16,23 @@ class ViewHome {
         this._qrScanner = qrScanner;
         this._invite = new InviteCode(aes);
         this._roomListRender = 0; // incremented per showRooms() call
+        this._pendingJoins = new Set();  // rooms joined with an invite code, waiting for the server
+        this._rejectedRooms = new Set(); // rooms the server rejected — warned once per session
+        this._rejectedJoins = new Set(); // invite joins rejected before the room was opened
     }
 
     init() {
         console.log("View Home init");
+
+        // room_info only comes after an accepted join
+        this._events.on(Events.WS.ROOM_INFO, (info) => {
+            this._pendingJoins.delete(info.id);
+            this._rejectedRooms.delete(info.id);
+        });
+
+        this._events.on(Events.WS.JOIN_REJECTED, async (info) => {
+            await this._joinRejected(info.id);
+        });
 
         // Keep the unread badges up to date while the room list is visible. Debounced, because
         // after a reconnect the missed messages arrive in a burst.
@@ -30,6 +43,7 @@ class ViewHome {
         };
         this._events.on(Events.CHAT.MESSAGE_STORED, refreshBadges);
         this._events.on(Events.CHAT.MESSAGES_EXPIRED, refreshBadges);
+        this._events.on(Events.CHAT.ROOM_CLEANED, refreshBadges);
 
         this._events.on(Events.PROFILE.OPEN, async () => {
             const profile = await this._db.getProfile();
@@ -164,7 +178,10 @@ class ViewHome {
 
         try {
             await this._db.addRoom(joinRoom);
-            this._events.emit(Events.WS.JOIN_ROOM, {id: joinRoom.id, notification: true});
+            this._pendingJoins.add(joinRoom.id);
+            this._rejectedJoins.delete(joinRoom.id); // left over from a rejection after the room was opened
+            // The invite code lets the server accept this join once, for a few minutes
+            this._events.emit(Events.WS.JOIN_ROOM, {id: joinRoom.id, notification: true, inviteCode: roomObj.c || undefined});
         } catch (err) {
             // Room was joined before — just open it
             if (err.name !== "ConstraintError") {
@@ -179,7 +196,34 @@ class ViewHome {
         this._qrScanner.Stop();
         await this._closeJoinModal();
 
+        // The server can answer during the fade out — a rejected room is gone already
+        if (this._rejectedJoins.delete(joinRoom.id)) return;
+
         this._events.emit(Events.ROOM.OPEN_ROOM, joinRoom.id);
+    }
+
+    // The server did not accept the join code. A room that was just joined with an invite code
+    // is removed again; for a known room (clock far off, or a room from before join codes) the
+    // user is warned once.
+    async _joinRejected(roomId) {
+        if (this._pendingJoins.delete(roomId)) {
+            this._rejectedJoins.add(roomId);
+            await this._db.removeRoom(roomId);
+            this._events.emit(Events.CHANGE.PAGE, Pages.HOME);
+            this._events.emit(Notifications.DANGER, {
+                header: "The invite code is not valid anymore",
+                msg: "It has expired or was used already. Please ask for a new invite code.",
+            });
+            return;
+        }
+
+        if (this._rejectedRooms.has(roomId)) return;
+        this._rejectedRooms.add(roomId);
+
+        this._events.emit(Notifications.WARNING, {
+            header: "The server did not let you into a room",
+            msg: "Check the date and time of this device. If the room is older, ask a member for a new invite code.",
+        });
     }
 
     // Hides the join modal and resolves once the fade out is finished.
@@ -210,8 +254,8 @@ class ViewHome {
         })
 
         // send join room request to server over WS
-        // The TTL is only taken by the server when it creates the room — it can not be changed later
-        this._events.emit(Events.WS.JOIN_ROOM, {id: newRoom.id, notification: newRoom.pushNotifications, ttl: newRoom.ttl});
+        // TTL and store are only taken by the server when it creates the room — they can not be changed later
+        this._events.emit(Events.WS.JOIN_ROOM, {id: newRoom.id, notification: newRoom.pushNotifications, ttl: newRoom.ttl, store: newRoom.store});
 
         // store new room in the database
         await this._db.addRoom(newRoom);

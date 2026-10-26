@@ -42,9 +42,19 @@ export class DatabaseAdapter {
             this._events.emit(Events.CHAT.MESSAGE_STORED, msg);
         });
 
-        // The server is the authority for the room TTL (set once when the room was created)
+        // The server is the authority for the room TTL and store setting (set once when the room
+        // was created). Rooms created before the store setting was kept have none (undefined).
         this._events.on(Events.WS.ROOM_INFO, async (info) => {
-            await this.db.room.update(info.id, {ttl: info.ttl});
+            const changes = {ttl: info.ttl};
+            if (info.store !== undefined) changes.store = info.store;
+            await this.db.room.update(info.id, changes);
+        });
+
+        // Another member cleaned the room. Only messages up to the clean are deleted: newer ones
+        // (sent right after the clean, also with the same join) arrive in the meantime.
+        this._events.on(Events.WS.ROOM_CLEANED, async (info) => {
+            await this.cleanRoom(info.id, info.timestamp);
+            this._events.emit(Events.CHAT.ROOM_CLEANED, info.id);
         });
 
         this._events.on(Events.WS.RECEIVED_FILE, async (msg) => {
@@ -66,14 +76,19 @@ export class DatabaseAdapter {
         await this.db.profile.update(0, {name});
     }
 
-    // Password change: new salt/verify and the re-encrypted room names and keys in one transaction
+    // Password change: new salt/verify and the re-encrypted room names, keys and join secrets in one transaction
     async replaceMasterKeyData(profile, rooms) {
         await this.db.transaction("rw", this.db.profile, this.db.room, async () => {
             await this.db.profile.update(0, {salt: profile.salt, verify: profile.verify});
             for (const room of rooms) {
-                await this.db.room.update(room.id, {name: room.name, key: room.key});
+                await this.db.room.update(room.id, {name: room.name, key: room.key, joinSecret: room.joinSecret});
             }
         });
+    }
+
+    // Join secret of the room, encrypted with the master key
+    async updateJoinSecret(roomId, joinSecret) {
+        await this.db.room.update(roomId, {joinSecret});
     }
 
     // Local storage used by ChatBit: number of messages, number and size of stored images
@@ -198,14 +213,21 @@ export class DatabaseAdapter {
         await this.db.room.add(room);
     }
 
-    async cleanRoom(roomId) {
-        await this.db.message.where('roomId').equals(roomId).delete();
-        await this.db.file.where('roomId').equals(roomId).delete();
+    // Deletes the messages and files of the room up to `until` (default: all).
+    async cleanRoom(roomId, until = Date.now()) {
+        const ids = await this.db.message.where('roomId').equals(roomId)
+            .filter(m => m.timestamp <= until)
+            .primaryKeys();
+
+        await this.db.transaction("rw", this.db.message, this.db.file, async () => {
+            await this.db.message.bulkDelete(ids);
+            await this.db.file.bulkDelete(ids); // a file has the id of its message
+        });
 
         await this.addMessage(new Message({
             id: crypto.randomUUID(),
             roomId: roomId,
-            timestamp: Date.now(),
+            timestamp: until,
         }));
     }
 

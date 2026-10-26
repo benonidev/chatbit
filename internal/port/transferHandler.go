@@ -40,6 +40,15 @@ func (c *WsClient) handleTransferStart(hdr *domain.File) bool {
 		return false
 	}
 
+	room, err := c.app.DB.Room.Get(hdr.RoomID[:])
+	if err != nil {
+		slog.Error("transfer for unknown room", slog.String("error", err.Error()))
+		return false
+	}
+
+	// The room decides whether the file is kept on the server
+	hdr.Store = room.StoreMessages(hdr.Store)
+
 	// Keep MIN_FREE_DISK_MB free — the server must not fill its disk
 	if hdr.Store {
 		free, err := diskFree(domain.FileDir)
@@ -49,12 +58,6 @@ func (c *WsClient) handleTransferStart(hdr *domain.File) bool {
 			c.sendNACK(hdr.ID, 0, "disk full")
 			return false
 		}
-	}
-
-	room, err := c.app.DB.Room.Get(hdr.RoomID[:])
-	if err != nil {
-		slog.Error("transfer for unknown room", slog.String("error", err.Error()))
-		return false
 	}
 
 	fileHdr := &domain.Transfer{
