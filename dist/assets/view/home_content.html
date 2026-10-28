@@ -1,0 +1,495 @@
+
+    <div class="homeContent">
+        <ul id="id_room_list"  class="listview image-listview flush transparent mt-3 mb-2">
+        </ul>
+    </div>
+    <!-- app footer: compact, one line plus the GitHub link -->
+    <div class="appFooter homeFooter">
+        <div class="home-footer-brand">
+            <!-- logo per theme, switched by the CSS (.logo-for-dark / .logo-for-light) -->
+            <img src="assets/img/LogoBenoni.svg" alt="" class="home-footer-logo logo-for-dark">
+            <img src="assets/img/LogoBenoniLight.svg" alt="" class="home-footer-logo logo-for-light">
+            <span><strong>ChatBit</strong> · end-to-end encrypted</span>
+        </div>
+        <div class="home-footer-meta">
+            <a href="https://github.com/benonich/chatbit" target="_blank" rel="noopener noreferrer">
+                <ion-icon name="logo-github"></ion-icon> Open source on GitHub
+            </a>
+            <a href="https://benoni.dev" target="_blank" rel="noopener noreferrer">© Benoni GmbH</a>
+        </div>
+    </div>
+    <!-- * app footer -->
+
+
+<!-- * App Capsule -->
+
+
+
+<!-- App Sidebar -->
+<div class="offcanvas offcanvas-start" tabindex="-1" id="sidebarPanel">
+    <div class="offcanvas-body">
+        <!-- profile box -->
+        <div class="profileBox">
+
+            <div style="width: 25px; font-size: xxx-large; color: white; padding-right: 65px" class="icon-box">
+                <ion-icon name="person-circle"></ion-icon>
+            </div>
+
+            <div class="in">
+                <strong id="in_alias"> </strong>
+            </div>
+            <a href="#" class="close-sidebar-button" data-bs-dismiss="offcanvas">
+                <ion-icon name="close"></ion-icon>
+            </a>
+        </div>
+        <!-- * profile box -->
+
+        <ul class="listview flush transparent no-line image-listview mt-2">
+            <li>
+                <a href="#" class="item" data-action="room:new_room_modal">
+                    <div class="icon-box bg-primary">
+                        <ion-icon name="add-circle-outline"></ion-icon>
+                    </div>
+                    <div class="in">
+                        Create new Room
+                    </div>
+                </a>
+            </li>
+            <li>
+                <a href="#" class="item" data-action="room:join_room_modal">
+                    <div class="icon-box bg-primary">
+                        <ion-icon name="barcode-outline"></ion-icon>
+                    </div>
+                    <div class="in" >
+                        Join Room
+                    </div>
+                </a>
+            </li>
+            <li>
+                <a href="#" class="item" data-bs-dismiss="offcanvas" data-action="app:update">
+                    <div class="icon-box bg-primary">
+                        <ion-icon name="refresh-outline"></ion-icon>
+                    </div>
+                    <div class="in">
+                        Update App
+                    </div>
+                </a>
+            </li>
+
+        </ul>
+
+        <!-- running version, filled from <meta name="app-version"> -->
+        <div id="in_app_version" class="app-version"></div>
+
+    </div>
+    <!-- sidebar buttons -->
+    <div class="sidebar-buttons">
+        <a href="#" class="button" data-bs-toggle="modal" data-bs-target="#in_user_settings" data-action="profile:open">
+            <ion-icon name="person-outline"></ion-icon>
+        </a>
+        <a href="#" class="button" data-action="settings:delete_all_ask">
+            <ion-icon name="trash-outline"></ion-icon>
+        </a>
+        <a href="#" class="button" data-bs-toggle="modal" data-bs-target="#in_app_settings" data-action="settings:open">
+            <ion-icon name="settings-outline"></ion-icon>
+        </a>
+        <a href="/lockscreen" class="button" id="change_to_lock">
+            <ion-icon name="lock-closed-outline"></ion-icon>
+        </a>
+    </div>
+    <!-- * sidebar buttons -->
+</div>
+<!-- * App Sidebar -->
+
+
+<!-- Modal New Room -->
+<div class="modal fade modalbox" id="modal:room:new_room" data-bs-backdrop="static" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">ChatBit</h5>
+                <a href="#" data-bs-dismiss="modal">Close</a>
+            </div>
+            <div class="modal-body">
+                <div class="login-form">
+                    <div class="section mt-2">
+                        <h1>New Room</h1>
+                        <h4>Fill the form to add a new Chat Room</h4>
+                    </div>
+                    <div class="section mt-4 mb-5">
+                        <form id="in_new_room_submit">
+                            <div class="form-group basic">
+                                <div class="input-wrapper">
+                                    <label class="form-label" for="in_new_room_name">Room Name</label>
+                                    <input type="text" class="form-control" id="in_new_room_name"
+                                           placeholder="Room Name">
+                                    <i class="clear-input">
+                                        <ion-icon name="close-circle"></ion-icon>
+                                    </i>
+                                </div>
+                            </div>
+
+                                <ul class="listview simple-listview">
+
+                                    <li>
+                                        <div style="text-align: left">
+                                            Push Notifications
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#in_info_new_room_push" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="in_new_room_push" checked>
+                                            <label class="form-check-label" for="in_new_room_push"></label>
+                                        </div>
+                                    </li>
+                                    <li class="collapse text-muted small" id="in_info_new_room_push">
+                                        You get a notification when a new message arrives while the app is closed. It never shows the content or the sender.
+                                    </li>
+
+                                    <li>
+                                        <div style="text-align: left">
+                                            Keep on Server
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#in_info_new_room_store" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="in_new_room_store" checked>
+                                            <label class="form-check-label" for="in_new_room_store"></label>
+                                        </div>
+                                    </li>
+                                    <li class="collapse text-muted small" id="in_info_new_room_store">
+                                        Your messages and files are kept encrypted on the server until their lifetime ends, so members who are offline still get them later. When off, only members who are online right now receive them. It is set when the room is created and can not be changed.
+                                    </li>
+
+                                    <li class="row" id="in_new_room_ttl_row">
+                                        <div style="text-align: left" class="col-6">
+                                            Max. lifetime
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#in_info_new_room_ttl" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
+                                        <div class="col-3 input-wrapper">
+                                            <input style="text-align: center" class="form-control" type="number" id="in_new_room_ttl" value="0">
+                                        </div>
+                                        <div class="col-3 input-wrapper">
+                                            <select class="form-control" id="in_new_room_ttl_unit">
+                                                <option value="60">min</option>
+                                                <option value="3600">hour</option>
+                                                <option value="86400">day</option>
+                                            </select>
+                                        </div>
+                                    </li>
+                                    <li class="collapse text-muted small" id="in_info_new_room_ttl">
+                                        Messages in this room are deleted after this time at the latest (0 = 30 days, the maximum).
+                                        It can only be set now and not changed later.
+                                    </li>
+                                </ul>
+
+
+                            <div class="mt-2">
+                                <button type="submit" class="btn btn-primary btn-block btn-lg"  data-action="room:new_room">Add Room</button>
+                            </div>
+
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Modal New Room -->
+
+
+<!-- Modal Join Room -->
+<div class="modal fade modalbox" id="modal:home:join_room" data-bs-backdrop="static" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">ChatBit</h5>
+                <a href="#" data-bs-dismiss="modal">Close</a>
+            </div>
+            <div class="modal-body">
+                <div class="login-form">
+                    <div class="section mt-2">
+                        <h1>Share Room</h1>
+                        <h4>Scan QR Code to join this Chat</h4>
+                    </div>
+                    <div class="section mt-4 mb-5">
+                        <select id="camera-select" class="form-select mb-2"></select>
+                        <video id="reader-video" playsinline autoplay muted style="width:100%"></video>
+
+                        <div class="mt-4 mb-2 text-center" style="color: var(--bs-secondary)">── or paste invite code ──</div>
+
+                        <div class="form-group basic">
+                            <div class="input-wrapper">
+                                <textarea class="form-control" id="in_paste_payload" rows="3" name="invite_code"
+                                    placeholder="Paste invite code here..."></textarea>
+                            </div>
+                        </div>
+                        <div id="in_paste_pin_wrapper" class="form-group basic mt-1">
+                            <div class="input-wrapper">
+                                <label class="form-label" for="in_paste_pin">PIN</label>
+                                <input type="password" class="form-control" id="in_paste_pin" name="invite_code_pin" placeholder="Enter PIN">
+                                <i class="clear-input"><ion-icon name="close-circle"></ion-icon></i>
+                            </div>
+                        </div>
+                        <div id="in_paste_error" class="text-danger mt-1" style="display:none"></div>
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-primary btn-block" data-action="room:join_room">
+                                <ion-icon name="enter-outline"></ion-icon> Join by Code
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- * Modal Join Room -->
+
+
+<!-- Modal User Settings -->
+<div class="modal fade modalbox" id="in_user_settings" data-bs-backdrop="static" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">ChatBit</h5>
+                <a href="#" data-bs-dismiss="modal">Close</a>
+            </div>
+            <div class="modal-body">
+                <div class="login-form">
+                    <div class="section mt-2">
+                        <h1>Profile</h1>
+                        <h4>Your alias for new rooms. In a room it is fixed when you create or join it — the other members see that name.</h4>
+                    </div>
+                    <div class="section mt-4 mb-5">
+                        <form>
+                            <div class="form-group basic">
+                                <div class="input-wrapper">
+                                    <label class="form-label" for="in_settings_alias">Alias</label>
+                                    <input type="text" class="form-control" id="in_settings_alias" placeholder="Your alias" maxlength="64">
+                                    <i class="clear-input">
+                                        <ion-icon name="close-circle"></ion-icon>
+                                    </i>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <button type="submit" class="btn btn-primary btn-block btn-lg" data-action="profile:save">Save</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Modal User Settings -->
+
+<!-- Modal App Settings -->
+<div class="modal fade modalbox" id="in_app_settings" data-bs-backdrop="static" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Settings</h5>
+                <a href="#" data-bs-dismiss="modal">Close</a>
+            </div>
+            <div class="modal-body settings-modal">
+
+                <div class="listview-title mt-2">Appearance</div>
+                <ul class="listview simple-listview">
+                    <li>
+                        <div>Dark mode</div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="in_settings_dark" data-change="settings:dark_mode">
+                            <label class="form-check-label" for="in_settings_dark"></label>
+                        </div>
+                    </li>
+                </ul>
+
+                <div class="listview-title mt-2">Security</div>
+                <ul class="listview simple-listview">
+                    <li>
+                        <label for="in_settings_logoff" class="mb-0">Log off when inactive</label>
+                        <select class="form-control w-auto" id="in_settings_logoff" data-change="settings:logoff_timer">
+                            <option value="0">Never</option>
+                            <option value="30">after 30 min</option>
+                            <option value="120">after 2 h</option>
+                            <option value="360">after 6 h</option>
+                            <option value="720">after 12 h</option>
+                        </select>
+                    </li>
+                </ul>
+
+                <div class="listview-title mt-2">Password</div>
+                <form class="section">
+                    <div class="form-group basic">
+                        <div class="input-wrapper">
+                            <label class="form-label" for="in_settings_pw_current">Current password</label>
+                            <input type="password" class="form-control" id="in_settings_pw_current" autocomplete="current-password">
+                        </div>
+                    </div>
+                    <div class="form-group basic">
+                        <div class="input-wrapper">
+                            <label class="form-label" for="in_settings_pw_new">New password</label>
+                            <input type="password" class="form-control" id="in_settings_pw_new" autocomplete="new-password">
+                        </div>
+                    </div>
+                    <div class="form-group basic">
+                        <div class="input-wrapper">
+                            <label class="form-label" for="in_settings_pw_repeat">Repeat new password</label>
+                            <input type="password" class="form-control" id="in_settings_pw_repeat" autocomplete="new-password">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block mt-2" data-action="settings:change_password">Change Password</button>
+                </form>
+
+                <div class="listview-title mt-2">Storage</div>
+                <ul class="listview simple-listview">
+                        <li>
+                            <div>Messages</div>
+                            <span class="text-muted" data-field="storage_messages"></span>
+                        </li>
+                        <li>
+                            <div>Images &amp; documents</div>
+                            <span class="text-muted" data-field="storage_images"></span>
+                        </li>
+                        <li>
+                            <div>Total used</div>
+                            <span class="text-muted" data-field="storage_total"></span>
+                        </li>
+                        <li>
+                            <div>Protected from clean up</div>
+                            <span class="text-muted" data-field="storage_persisted"></span>
+                        </li>
+                </ul>
+                <div class="section mt-2">
+                    <button type="button" class="btn btn-outline-danger btn-block" data-action="settings:clean_images_ask">Delete Downloaded Files</button>
+                </div>
+
+                <div class="listview-title mt-2">Info</div>
+                <ul class="listview simple-listview mb-4">
+                        <li>
+                            <div>Version</div>
+                            <span class="text-muted" data-field="info_version"></span>
+                        </li>
+                        <li>
+                            <div>Commit</div>
+                            <span class="text-muted" data-field="info_commit"></span>
+                        </li>
+                        <li>
+                            <div>Build</div>
+                            <span class="text-muted" data-field="info_build"></span>
+                        </li>
+                        <li>
+                            <div>Hash</div>
+                            <span class="text-muted" data-field="info_hash"></span>
+                        </li>
+                        <li>
+                            <div>Server</div>
+                            <span class="text-muted" data-field="info_server"></span>
+                        </li>
+                        <li>
+                            <div>Push notifications</div>
+                            <span class="text-muted" data-field="info_push"></span>
+                        </li>
+                        <li>
+                            <div>Offline cache</div>
+                            <span class="text-muted" data-field="info_sw"></span>
+                        </li>
+                </ul>
+
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Modal App Settings -->
+
+<!-- Delete Images -->
+<div class="modal fade dialogbox" id="modal:home:clean_images" data-bs-backdrop="static" tabindex="-1" style="display: none;">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Delete Images</h5>
+            </div>
+            <div class="modal-body">
+                Delete all downloaded images and documents on this device? Files of rooms with Keep on Server can be downloaded again while their message exists, files of other rooms are gone for good.
+            </div>
+            <div class="modal-footer">
+                <div class="btn-list">
+                    <a href="#" class="btn btn-text-danger btn-block" data-bs-dismiss="modal" data-action="settings:clean_images">
+                        <i class="bi bi-trash"></i>
+                        DELETE
+                    </a>
+                    <a href="#" class="btn btn-text-primary btn-block" data-bs-dismiss="modal">
+                        CANCEL
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Delete Images -->
+
+<!-- Delete Everything -->
+<div class="modal fade dialogbox" id="modal:home:delete_all" data-bs-backdrop="static" tabindex="-1" style="display: none;">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Delete Everything</h5>
+            </div>
+            <div class="modal-body">
+                Your profile, all rooms with their keys, messages and images are deleted and you leave all rooms. This cannot be undone — without an invite code you cannot join a room again.
+            </div>
+            <div class="modal-footer">
+                <div class="btn-list">
+                    <a href="#" class="btn btn-text-danger btn-block" data-bs-dismiss="modal" data-action="settings:delete_all">
+                        <i class="bi bi-trash"></i>
+                        DELETE EVERYTHING
+                    </a>
+                    <a href="#" class="btn btn-text-primary btn-block" data-bs-dismiss="modal">
+                        CANCEL
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Delete Everything -->
+
+<!-- Update: installed and available version before updating (ViewHome._checkUpdate) -->
+<div class="modal fade dialogbox" id="modal:home:update" tabindex="-1" style="display: none;">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" data-field="title">Update</h5>
+            </div>
+            <div class="modal-body update-info">
+                <div class="update-version">
+                    <div class="text-muted small">Installed</div>
+                    <div data-field="installed"></div>
+                </div>
+                <div class="update-version">
+                    <div class="text-muted small">Available on the server</div>
+                    <div data-field="available"></div>
+                </div>
+                <div class="small text-muted mt-2">
+                    The hash covers every file of the app. Compare it with the release on
+                    <a href="https://github.com/benonich/chatbit/releases" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    — the same hash means the server delivers exactly the published code.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="btn-list">
+                    <a href="#" class="btn btn-text-primary btn-block" data-bs-dismiss="modal" data-action="app:update_confirm" data-field="confirm">
+                        <ion-icon name="cloud-download-outline"></ion-icon> UPDATE NOW
+                    </a>
+                    <a href="#" class="btn btn-text-secondary btn-block" data-bs-dismiss="modal" data-field="cancel">CANCEL</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Update -->

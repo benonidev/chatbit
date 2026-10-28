@@ -1,0 +1,167 @@
+openapi: 3.0.3
+info:
+  title: WebRTC Signaling & Messaging API
+  version: 1.0.0
+  description: >
+    API for exchanging WebRTC offers/answers and ICE candidates and for
+    managing rooms/peers of a PWA chat app.
+
+servers:
+  - url: https://chatbit.ch/api
+
+paths:
+
+  /rooms/{roomId}/join:
+    post:
+      summary: Join a room
+      parameters:
+        - in: path
+          name: roomID
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinRoomRequest"
+      responses:
+        200:
+          description: Beigetreten
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinRoomResponse"
+
+  /rooms/{roomId}/leave:
+    post:
+      summary: Leave a room
+      parameters:
+        - in: path
+          name: roomID
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinRoomRequest"
+      responses:
+        204:
+          description: You leave the room
+
+  /signal/offer:
+    post:
+      summary: Offer an einen Peer senden
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, from, to, offer]
+              properties:
+                roomId:
+                  type: string
+                from:
+                  type: string
+                to:
+                  type: string
+                offer:
+                  type: object
+      responses:
+        200:
+          description: Offer weitergeleitet
+
+  /signal/answer:
+    post:
+      summary: Answer an einen Peer senden
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, from, to, answer]
+              properties:
+                roomId:
+                  type: string
+                from:
+                  type: string
+                to:
+                  type: string
+                answer:
+                  type: object
+      responses:
+        200:
+          description: Answer weitergeleitet
+
+  /signal/candidate:
+    post:
+      summary: ICE candidate weiterleiten
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, from, to, candidate]
+              properties:
+                roomId:
+                  type: string
+                from:
+                  type: string
+                to:
+                  type: string
+                candidate:
+                  type: object
+      responses:
+        200:
+          description: Candidate weitergeleitet
+
+    post:
+      summary: Store a chat message (optional, WebRTC normally sends it directly)
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sender:
+                  type: string
+                text:
+                  type: string
+      responses:
+        201:
+          description: Gespeichert
+
+components:
+  schemas:
+    JoinRoomRequest:
+      type: object
+      properties:
+        alias:
+          type: string
+
+    JoinRoomResponse:
+      type: object
+      properties:
+        alias:
+          type: array
+          items:
+            type: string
+
+    SignalOffer:
+      type: object
+      properties:
+        alias:
+          type: string

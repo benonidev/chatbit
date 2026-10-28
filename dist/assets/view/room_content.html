@@ -1,0 +1,541 @@
+
+
+<!-- shown while waiting for approval or after being removed (ViewRoom._renderRoomState) -->
+<div id="ro_room_state" class="room-state" hidden></div>
+
+<div id="ct_room" class="chatContent">
+
+</div>
+
+<!-- * App Capsule -->
+
+    <!-- chat footer -->
+    <div class="chatFooter">
+
+        <!-- the message being answered (ViewRoom._setReply) -->
+        <div id="ct_reply" class="reply-bar" hidden>
+            <div class="reply-bar-text">
+                <strong data-field="alias"></strong>
+                <span data-field="text"></span>
+            </div>
+            <button type="button" class="btn btn-icon btn-sm" data-action="chat:cancel_reply" aria-label="Cancel reply">
+                <ion-icon name="close-outline"></ion-icon>
+            </button>
+        </div>
+
+        <form id="send_message_form" >
+            <div class="dropdown">
+                <button class="btn btn-icon btn-primary room-accent rounded" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+                <div class="dropdown-menu" style="">
+                    <h6 class="dropdown-header">Send Data</h6>
+                    <a class="dropdown-item" href="#" data-action="chat:pick_file" data-body="ct_img_input">
+                        <i class="bi bi-image-fill"></i>Image
+                    </a>
+                    <a class="dropdown-item" href="#" data-action="chat:pick_file" data-body="ct_doc_input">
+                        <i class="bi bi-file-earmark-fill"></i>Document
+                    </a>
+                </div>
+                <input type="file" id="ct_img_input" accept="image/*" style="display:none;" data-change="chat:send_file">
+                <input type="file" id="ct_doc_input" style="display:none;" data-change="chat:send_document">
+            </div>
+            <div class="form-group boxed">
+                <div class="input-wrapper">
+                    <textarea id="ct_msg_input" rows="1" class="form-control" style=" width: 100%;"></textarea>
+
+                    <i class="clear-input">
+                        <ion-icon name="close-circle"></ion-icon>
+                    </i>
+                </div>
+            </div>
+            <button type="button" class="btn btn-icon btn-primary room-accent rounded" data-action="chat:send_message">
+                <ion-icon name="send"></ion-icon>
+            </button>
+        </form>
+    </div>
+    <!-- * chat footer -->
+
+<!-- Modal Share Room -->
+<div class="modal fade modalbox" id="modal:room:share_room" data-bs-backdrop="static" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">ChatBit</h5>
+                <a href="#" data-bs-dismiss="modal">Close</a>
+            </div>
+            <div class="modal-body">
+                <div class="login-form">
+                    <div class="section mt-2">
+                        <h1>Share Room</h1>
+                        <h4>Scan QR Code to join this Chat. Each code works once — tap "New code" for the next person.</h4>
+                    </div>
+                    <div class="section mt-4 mb-5">
+                        <div class="qr-wrapper">
+                            <div data-field="qr_code" style="display: flex; justify-content: center;"></div>
+                            <!-- shown when the join code of the QR code has expired -->
+                            <div data-field="qr_expired" class="qr-expired d-none">
+                                <div class="mb-2">Code expired</div>
+                                <button type="button" class="btn btn-primary" data-action="chat:renew_share_code">
+                                    <ion-icon name="refresh-outline"></ion-icon> New Code
+                                </button>
+                            </div>
+                        </div>
+                        <div class="text-center text-muted small mt-2">
+                            <span data-field="share_validity"></span>
+                            · <a href="#" data-action="chat:renew_share_code">New code</a>
+                        </div>
+                        <div class="form-group basic mt-3">
+                            <div class="input-wrapper">
+                                <label class="form-label" for="ct_share_pin">PIN (optional)</label>
+                                <input type="password" class="form-control" id="ct_share_pin" name="share_pin" placeholder="Encrypt with PIN">
+                                <i class="clear-input"><ion-icon name="close-circle"></ion-icon></i>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <button data-field="copy_btn" type="button" class="btn btn-primary btn-block" data-action="chat:copy_active_room">
+                                <ion-icon name="copy-outline"></ion-icon> Copy Code
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Modal Share Room -->
+
+<!-- Modal Members: the member list of the current epoch (ViewRoom._showMembers) -->
+<div class="modal fade modalbox" id="modal:room:members" data-bs-backdrop="static" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">ChatBit</h5>
+                <a href="#" data-bs-dismiss="modal">Close</a>
+            </div>
+            <div class="modal-body">
+                <div class="section mt-2">
+                    <h1>Members</h1>
+                    <h4>Everybody who can read new messages. Compare the fingerprint in person to be sure who is who.</h4>
+                    <div class="text-muted small">Your fingerprint: <code data-field="own_fingerprint"></code></div>
+                </div>
+                <ul class="listview simple-listview mt-3" data-field="members"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Modal Members -->
+
+<!-- Modal Security: how the room is protected (ViewRoom._showSecurity) -->
+<div class="modal fade modalbox" id="modal:room:security" data-bs-backdrop="static" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">ChatBit</h5>
+                <a href="#" data-bs-dismiss="modal">Close</a>
+            </div>
+            <div class="modal-body security-page">
+                <div class="section mt-2">
+                    <h1>Security</h1>
+                    <!-- status of the room, filled by ViewRoom._showSecurity -->
+                    <div class="security-status" data-field="status"></div>
+                </div>
+
+                <div class="section mt-3">
+                    <h3>How your messages are protected</h3>
+                    <p>Every message is encrypted on your phone before it is sent. It can only be decrypted with
+                        <strong>two keys together</strong>:</p>
+
+                    <div class="key-diagram">
+                        <div class="key-box key-base">
+                            <ion-icon name="qr-code-outline"></ion-icon>
+                            <strong>Base key</strong>
+                            <span>in the invite (QR code) · never sent to the server</span>
+                        </div>
+                        <div class="key-plus">+</div>
+                        <div class="key-box key-epoch">
+                            <ion-icon name="refresh-outline"></ion-icon>
+                            <strong>Epoch key</strong>
+                            <span>new with every member change and once a day</span>
+                        </div>
+                        <div class="key-arrow"><ion-icon name="arrow-down-outline"></ion-icon></div>
+                        <div class="key-box key-room">
+                            <ion-icon name="lock-closed-outline"></ion-icon>
+                            <strong>Room key of the epoch</strong>
+                            <span>encrypts and decrypts the messages</span>
+                        </div>
+                    </div>
+
+                    <h3 class="mt-3">How a new epoch key reaches every member</h3>
+                    <ol class="key-flow">
+                        <li>
+                            <div class="flow-icon flow-alice"><ion-icon name="key"></ion-icon></div>
+                            <div><strong>Alice makes a new epoch key</strong>
+                                <span>e.g. because Dave joins — random, only on her phone</span></div>
+                        </li>
+                        <li>
+                            <div class="flow-icon flow-alice"><ion-icon name="mail"></ion-icon></div>
+                            <div><strong>One envelope per member</strong>
+                                <span>she locks a copy with the <em>public key</em> of each member — only the
+                                    <em>private key</em> on that member's phone opens it</span>
+                                <div class="envelopes">
+                                    <span class="envelope"><ion-icon name="lock-closed"></ion-icon> Alice</span>
+                                    <span class="envelope"><ion-icon name="lock-closed"></ion-icon> Bob</span>
+                                    <span class="envelope"><ion-icon name="lock-closed"></ion-icon> Dave</span>
+                                    <span class="envelope missing"><ion-icon name="close"></ion-icon> Eve (removed)</span>
+                                </div></div>
+                        </li>
+                        <li>
+                            <div class="flow-icon flow-alice"><ion-icon name="create"></ion-icon></div>
+                            <div><strong>Signed and packed</strong>
+                                <span>she signs the envelopes and the member list with her key and wraps
+                                    everything with the base key</span></div>
+                        </li>
+                        <li>
+                            <div class="flow-icon flow-server"><ion-icon name="server"></ion-icon></div>
+                            <div><strong>The server only passes it on</strong>
+                                <span>it stores the locked package for members who are offline — it can open
+                                    none of the envelopes</span></div>
+                        </li>
+                        <li>
+                            <div class="flow-icon flow-member"><ion-icon name="lock-open"></ion-icon></div>
+                            <div><strong>Every phone opens its own envelope</strong>
+                                <span>Bob checks Alice's signature and opens his envelope with his private
+                                    key. Eve got no envelope — she can not read on.</span></div>
+                        </li>
+                    </ol>
+
+                    <h3 class="mt-3">How a message is sent</h3>
+                    <div class="msg-flow">
+                        <span class="msg-step"><ion-icon name="chatbubble-ellipses-outline"></ion-icon> Text</span>
+                        <ion-icon name="arrow-forward-outline" class="msg-arrow"></ion-icon>
+                        <span class="msg-step"><ion-icon name="create-outline"></ion-icon> signed</span>
+                        <ion-icon name="arrow-forward-outline" class="msg-arrow"></ion-icon>
+                        <span class="msg-step"><ion-icon name="lock-closed-outline"></ion-icon> room key</span>
+                        <ion-icon name="arrow-forward-outline" class="msg-arrow"></ion-icon>
+                        <span class="msg-step flow-server-text"><ion-icon name="server-outline"></ion-icon> server</span>
+                        <ion-icon name="arrow-forward-outline" class="msg-arrow"></ion-icon>
+                        <span class="msg-step"><ion-icon name="lock-open-outline"></ion-icon> members</span>
+                    </div>
+
+                    <ul class="security-list">
+                        <li><strong>Base key</strong> — created with the room and only passed on in the invite: the
+                            QR code or the copied code of "Share". It never goes to the server, so the server can
+                            never read your messages.</li>
+                        <li><strong>Epoch key</strong> — every time a member joins, leaves or is removed (and once a
+                            day) a new one is made. Each member gets it in its own envelope that only its device
+                            can open. Whoever left or was removed gets no new key and can not read on.</li>
+                        <li><strong>Only both together</strong> open a message. The server stores the envelopes but
+                            can not open them — each one is sealed for the device of one member (and wrapped with the
+                            base key). Someone with an old invite has the base key but no epoch key.</li>
+                        <li><strong>Join code (TOTP)</strong> — even the encrypted messages only go to members: every
+                            time the app connects, it proves membership with a one-time code from the join secret
+                            of the current epoch (valid once, for a few minutes). The join secret changes with every
+                            epoch, so a removed member can not even fetch the encrypted messages anymore. The server
+                            knows the join secret to check the codes — it opens no message.</li>
+                        <li><strong>Signed</strong> — every message is signed by its sender
+                            (<ion-icon name="shield-checkmark-outline" class="msg-signed"></ion-icon>). Messages
+                            with a wrong signature are never shown, nobody can write in someone else's name.</li>
+                    </ul>
+                </div>
+
+                <div class="section mt-3">
+                    <h3>Please take care</h3>
+                    <ul class="security-list warn">
+                        <li><strong>Share invites in person.</strong> The invite contains the base key. Whoever
+                            gets the QR code or the copied code can ask to join — a photo of the QR code too.</li>
+                        <li><strong>"Copy Code" over another messenger</strong> gives the base key to that service.
+                            A PIN helps only a little.</li>
+                        <li><strong>Only accept requests you expect</strong> and compare the fingerprint on both
+                            phones before you accept.</li>
+                        <li><strong>Check the members now and then.</strong> Remove devices you do not know or that
+                            were lost.</li>
+                    </ul>
+                </div>
+
+                <div class="section mt-3">
+                    <h3>What the server sees</h3>
+                    <div class="server-sees">
+                        <div>
+                            <div class="text-muted small">Sees</div>
+                            <ul>
+                                <li>Room ids and times</li>
+                                <li>Which device is in which room</li>
+                                <li>Approximate size (padded)</li>
+                                <li>The join secret (to check join codes — it decrypts nothing)</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <div class="text-muted small">Never sees</div>
+                            <ul>
+                                <li>Messages, images, files</li>
+                                <li>Names, room name, member list</li>
+                                <li>Base key and epoch keys (envelopes only sealed)</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section mt-3 mb-5">
+                    <div class="btn-list">
+                        <a href="#" class="btn btn-outline-primary btn-block" data-action="room:security_goto" data-body="members">
+                            <ion-icon name="people-outline"></ion-icon> Members and fingerprints
+                        </a>
+                        <a href="#" class="btn btn-outline-primary btn-block" data-action="room:security_goto" data-body="history">
+                            <ion-icon name="git-commit-outline"></ion-icon> Key history
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Modal Security -->
+
+<!-- Modal Key history: every epoch this device has (ViewRoom._showHistory) -->
+<div class="modal fade modalbox" id="modal:room:history" data-bs-backdrop="static" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">ChatBit</h5>
+                <a href="#" data-bs-dismiss="modal">Close</a>
+            </div>
+            <div class="modal-body">
+                <div class="section mt-2">
+                    <h1>Key history</h1>
+                    <h4>Every key change of this room that this device knows. Each one is signed by a member and points to the one before.</h4>
+                </div>
+                <ol class="key-history mt-3" data-field="history"></ol>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Modal Key history -->
+
+<!-- Message info: sender, fingerprint, signature, reply (ViewRoom._showMessageInfo) -->
+<div class="modal fade dialogbox" id="modal:room:message" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title alias-color" data-field="alias"></h5>
+            </div>
+            <div class="modal-body message-info">
+                <div class="small text-muted" data-field="time"></div>
+                <div class="mt-2">Fingerprint<br><code data-field="fingerprint"></code></div>
+                <div class="mt-2 small text-success">
+                    <ion-icon name="checkmark-circle-outline"></ion-icon> Signed by this member
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="btn-list">
+                    <a href="#" class="btn btn-text-primary btn-block" data-bs-dismiss="modal" data-action="chat:reply" data-field="reply">
+                        <ion-icon name="arrow-undo-outline"></ion-icon> REPLY
+                    </a>
+                    <a href="#" class="btn btn-text-secondary btn-block" data-bs-dismiss="modal">CLOSE</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Message info -->
+
+    <!-- Clean Room-->
+    <div class="modal fade dialogbox" id="modal:room:clean_room" data-bs-backdrop="static" tabindex="-1" style="display: none;">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Clear Chat</h5>
+                </div>
+                <div class="modal-body">
+                    Delete all messages and files of this room?
+                </div>
+                <div class="modal-footer">
+                    <div class="btn-list">
+                        <a href="#" class="btn btn-text-danger btn-block" data-bs-dismiss="modal" data-action="chat:clean_active_room">
+                            <i class="bi bi-phone"></i>
+                            ON THIS DEVICE
+                        </a>
+                        <a href="#" class="btn btn-text-danger btn-block" data-bs-dismiss="modal" data-action="chat:clean_active_room_server">
+                            <i class="bi bi-people"></i>
+                            FOR ALL MEMBERS
+                        </a>
+                        <a href="#" class="btn btn-text-primary btn-block" data-bs-dismiss="modal">
+                            CANCEL
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leave Room-->
+    <div class="modal fade dialogbox" id="modal:room:leave_room" data-bs-backdrop="static" tabindex="-1" style="display: none;">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Leave Room</h5>
+                </div>
+                <div class="modal-body">
+                    You want to leave this room?
+                </div>
+                <div class="modal-footer">
+                    <div class="btn-list">
+                        <a href="#" class="btn btn-text-danger btn-block" data-bs-dismiss="modal" data-action="chat:leave_active_room">
+                            <i class="bi bi-trash"></i>
+                            DELETE
+                        </a>
+                        <a href="#" class="btn btn-text-primary btn-block" data-bs-dismiss="modal">
+                            CANCEL
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- Modal Edit Room -->
+    <div class="modal fade modalbox" id="modal:room:edit_room" data-bs-backdrop="static" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">ChatBit</h5>
+                    <a href="#" data-bs-dismiss="modal">Close</a>
+                </div>
+                <div class="modal-body">
+                    <div class="login-form">
+                        <div class="section mt-2">
+                            <h1>Edit Room</h1>
+                            <h4>Fill the form to update the Chat Room</h4>
+                        </div>
+                        <div class="section mt-4 mb-5">
+                            <form>
+                                <div class="form-group basic">
+                                    <div class="input-wrapper">
+                                        <label class="form-label" for="ct_edit_room_name">Room Name</label>
+                                        <input type="text" class="form-control" id="ct_edit_room_name" name="room_name"
+                                               placeholder="Room Name">
+                                        <i class="clear-input">
+                                            <ion-icon name="close-circle"></ion-icon>
+                                        </i>
+                                    </div>
+                                </div>
+
+                                <ul class="listview simple-listview">
+                                    <li>
+                                        <div style="text-align: left">
+                                            Push Notifications
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#ct_info_room_push" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="ct_edit_room_push" name="room_notification">
+                                            <label class="form-check-label" for="ct_edit_room_push"></label>
+                                        </div>
+                                    </li>
+                                    <li class="collapse text-muted small" id="ct_info_room_push">
+                                        You get a notification when a new message arrives while the app is closed. It never shows the content or the sender.
+                                    </li>
+                                    <li>
+                                        <div style="text-align: left">
+                                            Keep on Server
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#ct_info_room_store" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="ct_edit_room_store" name="room_store" disabled>
+                                            <label class="form-check-label" for="ct_edit_room_store"></label>
+                                        </div>
+                                    </li>
+                                    <li class="collapse text-muted small" id="ct_info_room_store">
+                                        Your messages and files are kept encrypted on the server until their lifetime ends, so members who are offline still get them later. When off, only members who are online right now receive them. It is set when the room is created and can not be changed.
+                                    </li>
+
+                                    <!-- Room TTL: fixed when the room was created -->
+                                    <li>
+                                        <div style="text-align: left">
+                                            Max. lifetime
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#ct_info_room_ttl" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
+                                        <div><ion-icon name="timer-outline"></ion-icon> <span data-field="room_max_ttl"></span></div>
+                                    </li>
+                                    <li class="collapse text-muted small" id="ct_info_room_ttl">
+                                        Messages in this room are deleted after this time at the latest.
+                                        It is set when the room is created and can not be changed.
+                                    </li>
+
+                                    <!-- Delete time of own messages, at most the room TTL -->
+                                    <li class="row" id="ct_edit_room_ttl_row">
+                                        <div style="text-align: left" class="col-6">
+                                            Delete after
+                                            <a href="#" class="text-muted" data-bs-toggle="collapse" data-bs-target="#ct_info_message_ttl" aria-label="Info">
+                                                <ion-icon name="information-circle-outline"></ion-icon>
+                                            </a>
+                                        </div>
+                                        <div class="col-6 input-wrapper">
+                                            <!-- options are filled by _fillEditRoomModal: room TTL + the fixed steps below it -->
+                                            <select class="form-control" id="ct_edit_room_ttl" name="message_ttl"></select>
+                                        </div>
+                                    </li>
+                                    <li class="collapse text-muted small" id="ct_info_message_ttl">
+                                        Your own messages are deleted after this time — earlier than the room allows, if you like.
+                                        Only fixed steps are offered — an individual time would make your messages recognizable to the server.
+                                    </li>
+                                </ul>
+
+                                <div class="mt-2">
+                                    <button type="button" class="btn btn-primary btn-block btn-lg" data-action="chat:update_active_room">Update Room</button>
+                                </div>
+
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- * Modal Add Room -->
+
+    <div class="modal fade dialogbox" id="ct_image" data-bs-backdrop="static" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <img id="modal-image" src="" alt="image" class="img-fluid">
+                <div class="modal-footer">
+                    <div class="btn-inline">
+                        <a href="#" class="btn btn-text-secondary" data-bs-dismiss="modal">CLOSE</a>
+                        <button type="button" class="btn btn-text-primary" data-action="chat:share_image">SHARE</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+<!-- Text tdo long-->
+<div id="ct_msg_maxlength" class="notification-box">
+    <div class="notification-dialog ios-style bg-danger">
+        <div class="notification-header">
+            <div class="right">
+                <a href="#" class="close-button">
+                    <ion-icon name="close-circle"></ion-icon>
+                </a>
+            </div>
+        </div>
+        <div class="notification-content">
+            <div class="in">
+                <h3 class="subtitle">Max length is 1024 charts</h3>
+                <div class="text">
+                    Please make you message shorter...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+

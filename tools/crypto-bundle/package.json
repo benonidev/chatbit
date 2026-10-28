@@ -1,0 +1,18 @@
+{
+  "name": "chatbit-crypto-bundle",
+  "private": true,
+  "description": "Builds dist/assets/js/lib/crypto-bundle.js (HPKE X25519 + Ed25519) — see build.mjs",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@hpke/core": "1.9.0",
+    "@hpke/dhkem-x25519": "1.8.0",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0"
+  }
+}

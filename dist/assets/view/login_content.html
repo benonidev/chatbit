@@ -1,0 +1,48 @@
+
+    <div id="appCapsule" class="pt-0">
+        <div class="login-form login-page mt-1">
+            <div class="section">
+                <!-- logo per theme, switched by the CSS (.logo-for-dark / .logo-for-light) -->
+                <img src="assets/img/LogoBenoni.svg" alt="image" class="form-image logo-for-dark">
+                <img src="assets/img/LogoBenoniLight.svg" alt="image" class="form-image logo-for-light">
+            </div>
+            <br>
+            <div class="section mt-1">
+                <h1>ChatBit</h1>
+                <h4>End-to-end encrypted.</h4>
+            </div>
+            <div class="section mt-1 mb-5">
+                <form id="login_submit" data-submit="app:register">
+                    <div class="form-group boxed">
+                        <div class="input-wrapper">
+                            <input type="text" class="form-control" id="lo_alias" placeholder="Alias" maxlength="64">
+                            <i class="clear-input">
+                                <ion-icon name="close-circle"></ion-icon>
+                            </i>
+                        </div>
+                    </div>
+
+                    <div class="form-group boxed">
+                        <div class="input-wrapper">
+                            <input type="password" class="form-control" id="lo_password" placeholder="Password" autocomplete="off">
+                            <i class="clear-input">
+                                <ion-icon name="close-circle"></ion-icon>
+                            </i>
+                        </div>
+                    </div>
+
+                    <div class="form-button-group">
+                        <button type="submit" class="btn btn-primary btn-block btn-lg">Register</button>
+                    </div>
+
+                </form>
+
+                <!-- privacy note: below the form, only as additional information -->
+                <div class="login-info">
+                    <ion-icon name="lock-closed-outline"></ion-icon>
+                    <span>Your profile is stored only on this device.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+

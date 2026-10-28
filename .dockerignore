@@ -1,0 +1,10 @@
+# Keep runtime data, secrets and local tooling out of the build context
+.git
+.github
+.idea
+.DS_Store
+artifacts/
+chatbit_db.kv/
+files/
+vapid.json
+.env

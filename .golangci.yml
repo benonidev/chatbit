@@ -1,0 +1,24 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - bodyclose     # unclosed HTTP response bodies
+    - errorlint     # error comparison/wrapping that breaks errors.Is/As
+    - misspell
+    - noinlineerr   # no `if err := f(); err != nil` — assign first, then check
+    - unconvert
+  exclusions:
+    presets:
+      - std-error-handling
+    paths:
+      - old/        # legacy code, not part of the build
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

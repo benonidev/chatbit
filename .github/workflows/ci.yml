@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]   # lint and tests on every branch
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Go – golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Linters and formatters (gofmt, goimports) are configured in .golangci.yml
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+
+  go:
+    name: Go – test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+      - name: go build
+        run: go build -trimpath -o artifacts/chatbit .
+
+  web:
+    name: PWA – syntax check, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Checks every own JS file (ES modules) for syntax errors; vendored libraries are skipped.
+      # service-worker.js is a Go template ({{.Commit}}), but the placeholder sits in a string.
+      - name: node --check
+        run: |
+          find dist -name '*.js' -not -path 'dist/assets/js/lib/*' -not -path 'dist/assets/js/plugins/*' -print0 \
+            | xargs -0 -n1 node --check
+
+      # Room key cryptography and the protocol with several clients (docs/room-keys.md)
+      - name: node --test
+        run: node --test "tests/js/*.test.mjs"
+
+      # The checked in crypto bundle must be exactly what the pinned versions build
+      - name: crypto bundle is reproducible
+        working-directory: tools/crypto-bundle
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          git diff --exit-code ../../dist/assets/js/lib/crypto-bundle.js
+
+  docker:
+    name: Docker image
+    needs: [lint, go, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # Secrets cannot be used in `if:` directly — the private registry is only used when they are set
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      # Images are only published from main, develop and version tags; other branches and PRs only build
+      PUBLISH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to registry.benoni.dev
+        if: env.PUBLISH == 'true' && env.REGISTRY_USERNAME != ''
+        uses: docker/login-action@v4
+        with:
+          registry: registry.benoni.dev
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}
+            ${{ env.REGISTRY_USERNAME != '' && 'registry.benoni.dev/chatbit' || '' }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      # Feature branches and pull requests only build the image to validate the Dockerfile
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_BASE_IMAGE=golang:1.27-alpine
+            TARGET_BASE_IMAGE=alpine:3.24
+            COMMIT=${{ github.sha }}
+            VERSION=${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

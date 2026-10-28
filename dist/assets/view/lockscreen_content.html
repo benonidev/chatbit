@@ -1,0 +1,39 @@
+
+    <div id="appCapsule" class="pt-0">
+        <div class="login-form login-page mt-1">
+            <div class="section">
+                <!-- logo per theme, switched by the CSS (.logo-for-dark / .logo-for-light) -->
+                <img src="assets/img/LogoBenoni.svg" alt="image" class="form-image logo-for-dark">
+                <img src="assets/img/LogoBenoniLight.svg" alt="image" class="form-image logo-for-light">
+            </div>
+            <div class="pageTitle" style="text-align: center">
+                <br>
+                <h1>Locked</h1>
+                <h4>Local Database is locked</h4>
+            </div>
+            <div class="section mt-5">
+                <h2 id="ls_alias">alias</h2>
+            </div>
+
+            <div class="section mt-3 mb-5">
+                <form id="lock_submit" data-submit="lock:unlock">
+
+                    <div class="form-group boxed">
+                        <div class="input-wrapper">
+                            <input type="password" class="form-control" id="ls_password" placeholder="Password"
+                                autocomplete="off">
+                            <i class="clear-input">
+                                <ion-icon name="close-circle"></ion-icon>
+                            </i>
+                        </div>
+                    </div>
+
+                    <div class="form-button-group">
+                        <button type="submit" class="btn btn-primary btn-block btn-lg">Unlock</button>
+                    </div>
+
+                </form>
+            </div>
+        </div>
+    </div>
+    <!-- * App Capsule -->
