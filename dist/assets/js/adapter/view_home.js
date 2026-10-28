@@ -1,37 +1,41 @@
 import {Events} from "./event.js";
 import {Pages} from "./page.js";
-import {Room} from "../domain/room.js";
 import {Notifications} from "./notification.js";
 import {Modals} from "./modal.js";
 import {InviteCode, InviteError} from "./invite.js";
 import {idHue} from "./color.js";
+import {logger} from "./log.js";
+
+const log = logger("home");
 
 // Home page: room list, creating new rooms and joining rooms via invite code or QR code.
 class ViewHome {
-    constructor(events, aes, keyStore, db, qrScanner) {
+    constructor(events, aes, keyStore, db, qrScanner, roomKeys) {
         this._events = events;
         this._db = db;
         this._aes = aes;   // AESAdapter instance
         this._keyStore = keyStore;
+        this._roomKeys = roomKeys;
         this._qrScanner = qrScanner;
         this._invite = new InviteCode(aes);
         this._roomListRender = 0; // incremented per showRooms() call
-        this._pendingJoins = new Set();  // rooms joined with an invite code, waiting for the server
         this._rejectedRooms = new Set(); // rooms the server rejected — warned once per session
-        this._rejectedJoins = new Set(); // invite joins rejected before the room was opened
+        this._rejectedJoins = new Set(); // join requests rejected before the room was opened
     }
 
     init() {
-        console.log("View Home init");
-
         // room_info only comes after an accepted join
         this._events.on(Events.WS.ROOM_INFO, (info) => {
-            this._pendingJoins.delete(info.id);
             this._rejectedRooms.delete(info.id);
         });
 
         this._events.on(Events.WS.JOIN_REJECTED, async (info) => {
-            await this._joinRejected(info.id);
+            if (info.reason === "code" || info.reason === "declined") await this._joinRejected(info.id, info.reason);
+        });
+
+        // Approved, removed or deleted: the list shows the status
+        this._events.on(Events.ROOM.CHANGED, () => {
+            if (this._onHomePage) this.showRooms();
         });
 
         // Keep the unread badges up to date while the room list is visible. Debounced, because
@@ -55,9 +59,16 @@ class ViewHome {
         });
 
         this._events.on(Events.APP.UPDATE, () => {
-            this._updateApp().catch(err => {
-                console.error("App update failed:", err);
+            this._checkUpdate().catch(err => {
+                log.error("update check failed:", err);
                 this._events.emit(Notifications.DANGER, {header: "Update", msg: "Update check failed. Are you online?"});
+            });
+        });
+
+        this._events.on(Events.APP.UPDATE_CONFIRM, () => {
+            this._updateApp().catch(err => {
+                log.error("app update failed:", err);
+                this._events.emit(Notifications.DANGER, {header: "Update", msg: "The update failed. Are you online?"});
             });
         });
 
@@ -74,19 +85,15 @@ class ViewHome {
                 const versionEl = document.getElementById("in_app_version");
                 if (versionEl && version) versionEl.textContent = version;
 
-                console.log("View Home Page");
-
                 await this.showRooms();
             }
         });
 
         this._events.on(Events.ROOM.NEW_ROOM_MODAL, async (msg) => {
-            console.log("New Room Modal");
             this._events.emit(Events.MODAL.OPEN, Modals.HOME.NEW_ROOM);
         });
 
         this._events.on(Events.ROOM.JOIN_ROOM_MODAL, async (msg) => {
-            console.log("Join Room Modal");
             // The scanner starts the camera when the modal is shown and stops it when it is hidden
             this._qrScanner.Start((code) => this._joinRoomByScan(code));
             this._events.emit(Events.MODAL.OPEN, Modals.HOME.JOIN_ROOM);
@@ -94,14 +101,12 @@ class ViewHome {
         });
 
         this._events.on(Events.ROOM.NEW_ROOM, async (msg) => {
-            console.log("Add Room");
-            this.addRoom().catch(err => console.error('addRoom failed:', err));
+            this.addRoom().catch(err => log.error("creating the room failed:", err));
             this._events.emit(Events.MODAL.CLOSE, Modals.HOME.NEW_ROOM);
             // todo catch error
         });
 
         this._events.on(Events.ROOM.JOIN_ROOM, async (msg) => {
-            console.log("join Room");
             await this._joinRoomByPaste()
             // todo catch error
         });
@@ -153,8 +158,13 @@ class ViewHome {
                     header: "The invite code is protected",
                     msg: pin ? "The PIN is not correct for this invite code" : "Please enter the PIN of the invite code",
                 });
+            } else if (err instanceof InviteError && err.reason === "old") {
+                this._events.emit(Notifications.DANGER, {
+                    header: "Invite code of an older version",
+                    msg: "Rooms of older versions do not exist anymore. Please ask for a new invite code.",
+                });
             } else {
-                console.error("Invalid invite code:", err);
+                log.warn("invalid invite code:", err.message);
                 this._events.emit(Notifications.DANGER, {
                     header: "The invite code is not valid",
                     msg: "Please use the invite code or QR code of a ChatBit room",
@@ -164,30 +174,14 @@ class ViewHome {
         }
     }
 
-    // invite: {i: roomId, n: roomName, k: base64 room key}
-    async _joinRoom(roomObj) {
-
-        const joinRoom = new Room({
-            id: roomObj.i,
-            name: await this._aes.encrypt(roomObj.n, this._keyStore.getMasterKey()),
-            key: await this._aes.encrypt(roomObj.k, this._keyStore.getMasterKey()),
-            pushNotifications: true,
-            store: true,
-            ttl: 0
-        })
-
+    // invite: {i, n, g, s, m, c} — sends the join request; the room waits for the approval of
+    // the inviter. An existing room is just opened.
+    async _joinRoom(invite) {
         try {
-            await this._db.addRoom(joinRoom);
-            this._pendingJoins.add(joinRoom.id);
-            this._rejectedJoins.delete(joinRoom.id); // left over from a rejection after the room was opened
-            // The invite code lets the server accept this join once, for a few minutes
-            this._events.emit(Events.WS.JOIN_ROOM, {id: joinRoom.id, notification: true, inviteCode: roomObj.c || undefined});
+            await this._roomKeys.joinByInvite(invite);
         } catch (err) {
-            // Room was joined before — just open it
-            if (err.name !== "ConstraintError") {
-                console.error("Failed to join room:", err);
-                return;
-            }
+            log.error("joining the room failed:", err);
+            return;
         }
 
         // Close the modal completely before switching the page: the page change replaces the
@@ -197,22 +191,32 @@ class ViewHome {
         await this._closeJoinModal();
 
         // The server can answer during the fade out — a rejected room is gone already
-        if (this._rejectedJoins.delete(joinRoom.id)) return;
+        if (this._rejectedJoins.delete(invite.i)) return;
 
-        this._events.emit(Events.ROOM.OPEN_ROOM, joinRoom.id);
+        this._events.emit(Events.ROOM.OPEN_ROOM, invite.i);
     }
 
-    // The server did not accept the join code. A room that was just joined with an invite code
-    // is removed again; for a known room (clock far off, or a room from before join codes) the
-    // user is warned once.
-    async _joinRejected(roomId) {
-        if (this._pendingJoins.delete(roomId)) {
+    // The server did not let the device in. A room that waits for approval is removed: the request
+    // was declined, or the invite expired / was used / was not approved within 24 hours. For a
+    // member room the user is warned once.
+    async _joinRejected(roomId, reason) {
+        log.warn("the server rejected the join code of a room");
+        log.debug("rejected room", roomId);
+
+        const room = await this._db.getRoom(roomId);
+        if (!room) return;
+
+        if (room.isPending()) {
             this._rejectedJoins.add(roomId);
-            await this._db.removeRoom(roomId);
+            await this._roomKeys.deleteLocal(roomId);
             this._events.emit(Events.CHANGE.PAGE, Pages.HOME);
-            this._events.emit(Notifications.DANGER, {
-                header: "The invite code is not valid anymore",
-                msg: "It has expired or was used already. Please ask for a new invite code.",
+            this._events.emit(Notifications.DANGER, reason === "declined" ? {
+                header: "Join request declined",
+                msg: `Your request to join "${await this._aes.decrypt(room.name, this._keyStore.getMasterKey())}" was declined.`,
+                time: 10000,
+            } : {
+                header: "The invite is not valid anymore",
+                msg: "It has expired, was used already, or was not approved within 24 hours. Please ask for a new invite code.",
             });
             return;
         }
@@ -222,7 +226,7 @@ class ViewHome {
 
         this._events.emit(Notifications.WARNING, {
             header: "The server did not let you into a room",
-            msg: "Check the date and time of this device. If the room is older, ask a member for a new invite code.",
+            msg: "Check the date and time of this device. If it stays, ask a member for a new invite code.",
         });
     }
 
@@ -243,26 +247,18 @@ class ViewHome {
         });
     }
 
+    // TTL and store are only taken by the server when it creates the room — they can not be changed later
     async addRoom() {
-        const newRoom = new Room({
-            id: crypto.randomUUID(),
-            name: await this._aes.encrypt(document.getElementById("in_new_room_name").value, this._keyStore.getMasterKey()),
-            key: await this._aes.encrypt(await this._aes.exportKey(await this._aes.generateKey()), this._keyStore.getMasterKey()),
+        const id = await this._roomKeys.createRoom({
+            name: document.getElementById("in_new_room_name").value,
             pushNotifications: document.getElementById("in_new_room_push").checked,
             store: document.getElementById("in_new_room_store").checked,
-            ttl: document.getElementById("in_new_room_ttl").value * document.getElementById("in_new_room_ttl_unit").value
-        })
-
-        // send join room request to server over WS
-        // TTL and store are only taken by the server when it creates the room — they can not be changed later
-        this._events.emit(Events.WS.JOIN_ROOM, {id: newRoom.id, notification: newRoom.pushNotifications, ttl: newRoom.ttl, store: newRoom.store});
-
-        // store new room in the database
-        await this._db.addRoom(newRoom);
+            ttl: document.getElementById("in_new_room_ttl").value * document.getElementById("in_new_room_ttl_unit").value,
+        });
 
         this._cleanNewRoomForm();
 
-        this._events.emit(Events.STATE.ROOM, newRoom.id);
+        this._events.emit(Events.STATE.ROOM, id);
     }
 
     _cleanNewRoomForm() {
@@ -282,7 +278,7 @@ class ViewHome {
         el.textContent = profile.name ?? "";
     }
 
-    // New alias: used for the messages sent from now on (sent messages keep the old one)
+    // New alias: only for rooms created or joined from now on — in a room the alias is fixed
     async _saveProfile() {
         const name = document.getElementById("in_settings_alias").value.trim();
         if (!name) {
@@ -294,11 +290,35 @@ class ViewHome {
         await this._showAlias();
 
         bootstrap.Modal.getInstance(document.getElementById("in_user_settings"))?.hide();
-        this._events.emit(Notifications.INFO, {header: "Profile", msg: "Alias saved."});
+        this._events.emit(Notifications.INFO, {header: "Profile", msg: "Alias saved. It is used for new rooms — existing rooms keep your name."});
     }
 
-    // Looks for a new service worker version; if there is one, waits until it is active
-    // and reloads the page with it.
+    // Shows the installed version next to the one the server delivers now (version, commit, build
+    // date, hash over all files) — the update only starts after "Update now"
+    async _checkUpdate() {
+        const [version, commit, buildDate] = (document.querySelector('meta[name="app-version"]')?.content ?? "").split(" · ");
+        const installed = {version, commit, buildDate, assetHash: document.querySelector('meta[name="app-hash"]')?.content ?? ""};
+
+        const res = await fetch("/version.json", {cache: "no-store"});
+        if (!res.ok) throw new Error("version.json: " + res.status);
+        const available = await res.json();
+
+        // The meta tag has the short commit
+        const same = available.assetHash === installed.assetHash && (available.commit ?? "").startsWith(installed.commit ?? "-");
+
+        const modal = document.getElementById(Modals.HOME.UPDATE);
+        const field = name => modal.querySelector(`[data-field="${name}"]`);
+        field("title").textContent = same ? "ChatBit is up to date" : "New version available";
+        field("installed").innerHTML = versionHTML(installed);
+        field("available").innerHTML = versionHTML(available);
+        field("confirm").hidden = same;
+        field("cancel").textContent = same ? "CLOSE" : "CANCEL";
+
+        this._events.emit(Events.MODAL.OPEN, Modals.HOME.UPDATE);
+    }
+
+    // Loads the new service worker version, waits until it is active and reloads the page with
+    // it. Without a new worker (it was installed in the background already) a reload is enough.
     async _updateApp() {
         const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
         if (!reg) {
@@ -306,12 +326,12 @@ class ViewHome {
             return;
         }
 
-        this._events.emit(Notifications.INFO, {header: "Update", msg: "Checking for a new version..."});
+        this._events.emit(Notifications.INFO, {header: "Update", msg: "Loading the new version..."});
         await reg.update();
 
         const sw = reg.installing || reg.waiting;
         if (!sw) {
-            this._events.emit(Notifications.INFO, {header: "Update", msg: "ChatBit is up to date."});
+            location.reload();
             return;
         }
 
@@ -339,6 +359,8 @@ class ViewHome {
         let html = "";
         for (const room of rooms) {
             const name = await this._aes.decrypt(room.name, this._keyStore.getMasterKey());
+            const status = room.isPending() ? `<div class="text-muted small">waiting for approval</div>`
+                : room.isRemoved() ? `<div class="text-muted small">you are no member anymore</div>` : "";
             html += `
                 <li>
                     <a href="#" data-action="room:open_room" data-body="${room.id}" class="item col">
@@ -346,7 +368,7 @@ class ViewHome {
                             <ion-icon name="chatbubble-ellipses-outline" class="md hydrated"></ion-icon>
                         </div>
                         <div class="in">
-                            <div>${escapeHTML(name)}</div>
+                            <div>${escapeHTML(name)}${status}</div>
                         </div>
                         <span class="badge badge-danger unread-badge" data-unread-room="${room.id}" hidden></span>
                     </a>
@@ -383,3 +405,21 @@ function escapeHTML(str) {
 }
 
 export default ViewHome
+
+// "1.4.0 · a1b2c3d · 27.10.2026" plus the start of the hash; values come from the server — text only
+function versionHTML(v) {
+    const esc = text => {
+        const el = document.createElement("div");
+        el.textContent = text ?? "";
+        return el.innerHTML;
+    };
+    const commit = (v.commit ?? "").slice(0, 7);
+    const date = v.buildDate && !isNaN(new Date(v.buildDate)) ? new Date(v.buildDate).toLocaleString() : v.buildDate;
+    const commitLink = /^[0-9a-f]{7,40}$/.test(commit)
+        ? `<a href="https://github.com/benonich/chatbit/commit/${commit}" target="_blank" rel="noopener noreferrer"><code>${commit}</code></a>`
+        : `<code>${esc(commit || "—")}</code>`;
+    const hash = (v.assetHash ?? "").toUpperCase();
+    return `<strong>${esc(v.version || "dev")}</strong> · ${commitLink}` +
+        `<div class="small text-muted">${esc(date || "")}</div>` +
+        `<div class="small">Hash <code>${esc(hash ? hash.slice(0, 16).match(/.{4}/g).join(" ") : "—")}</code></div>`;
+}

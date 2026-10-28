@@ -1,4 +1,7 @@
 import {Modals} from "./modal.js";
+import {logger} from "./log.js";
+
+const log = logger("scanner");
 
 // Local copy of the zxing-cpp WebAssembly decoder (used by the BarcodeDetector polyfill)
 const ZXING_WASM_URL = "assets/js/lib/zxing/zxing_reader-2.2.4.wasm";
@@ -63,7 +66,7 @@ export class QRScanner {
             if (err.name === "NotAllowedError") {
                 alert("Camera access denied. You can still join with an invite code.");
             } else {
-                console.error("Camera error:", err);
+                log.error("camera error:", err);
             }
             this.Stop();
         }
@@ -153,7 +156,7 @@ export class QRScanner {
             `<option value="${d.deviceId}">${d.label || "Camera " + (i + 1)}</option>`
         ).join("");
         if (activeId) select.value = activeId;
-        select.onchange = () => startStream(select.value).catch(err => console.error("Camera error:", err));
+        select.onchange = () => startStream(select.value).catch(err => log.error("camera error:", err));
 
         // Detect directly on the video element. Until a frame is available detect() fails
         // or finds nothing, and the loop simply tries again.

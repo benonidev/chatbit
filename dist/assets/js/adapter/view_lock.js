@@ -1,5 +1,6 @@
 import {Events} from "./event.js";
 import {Pages} from "./page.js";
+import {Notifications} from "./notification.js";
 
 // Lock screen: shows the alias and unlocks the key store with the password.
 export class ViewLock {
@@ -10,6 +11,9 @@ export class ViewLock {
     }
 
     init() {
+        this._events.on(Events.LOCK.UNLOCK, (form) => this.unlock(form));
+        this._events.on(Events.LOCK.CLEAR, () => this.clear());
+
         this._events.on(Events.STATE.PAGE, async (pageName) => {
             if(pageName === Pages.LOCK){
                 await this.setAliasName();
@@ -27,11 +31,9 @@ export class ViewLock {
 
         const ok = await this._keyStore.unlock(password);
         if (!ok) {
-            notification("ls_pwd_incorrect", 5000);
+            this._events.emit(Notifications.DANGER, {header: "Unlock", subtitle: "Password incorrect...", msg: "Please try it again.", time: 5000});
             form.querySelector('#ls_password').value = "";
         } else {
-            console.log("unlock database");
-
             await this._unlockEvent();
         }
     }

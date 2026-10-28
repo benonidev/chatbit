@@ -3,7 +3,9 @@ package domain_test
 import (
 	"chatbit/internal/domain"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -71,4 +73,37 @@ func TestRoomStoreMessages(t *testing.T) {
 	legacy := &domain.Room{}
 	assert.True(t, legacy.StoreMessages(true), "room without setting → message decides")
 	assert.False(t, legacy.StoreMessages(false))
+}
+
+func TestRoomMembershipPerEpoch(t *testing.T) {
+	r := &domain.Room{Epoch: 3}
+	peer := uuid.New()
+
+	r.AddPeer(peer, true)
+	assert.True(t, r.IsMember(peer))
+
+	// After a rotation the peer has to join again
+	r.Epoch = 4
+	assert.False(t, r.IsMember(peer))
+	assert.True(t, r.HasPeer(peer))
+
+	r.AddPeer(peer, false)
+	assert.True(t, r.IsMember(peer))
+	assert.Len(t, r.Peers, 1, "joining again updates the entry")
+	assert.False(t, r.Peers[0].Notification)
+}
+
+func TestRoomPending(t *testing.T) {
+	r := &domain.Room{}
+	now := time.Unix(1_000_000, 0)
+	a, b := uuid.New(), uuid.New()
+
+	r.AddPending(a, now, now.Add(time.Hour))
+	r.AddPending(b, now, now.Add(time.Minute))
+	assert.True(t, r.IsPending(a, now))
+	assert.False(t, r.IsPending(b, now.Add(2*time.Minute)), "expired")
+
+	// Removing one also drops the expired ones
+	r.RemovePending(a, now.Add(2*time.Minute))
+	assert.Empty(t, r.Pending)
 }

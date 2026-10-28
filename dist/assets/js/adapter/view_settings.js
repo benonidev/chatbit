@@ -4,6 +4,9 @@ import {Modals} from "./modal.js";
 import {MIN_PASSWORD_LENGTH} from "./key_store.js";
 import {formatBytes} from "../domain/file.js";
 import {LOGOFF_KEY, readLogoffMinutes} from "./logoff.js";
+import {logger} from "./log.js";
+
+const log = logger("settings");
 
 // Same key as the dark mode handling in base.js ("1" dark, "0" light)
 const DARK_MODE_KEY = "ChatbitDarkMode";
@@ -78,7 +81,7 @@ export class ViewSettings {
         try {
             ok = await this._keyStore.changePassword(current.value, next.value);
         } catch (err) {
-            console.error("Changing the password failed:", err);
+            log.error("changing the password failed:", err);
             this._notify(Notifications.DANGER, "Changing the password failed, the old password is still valid.");
             return;
         }
@@ -176,7 +179,7 @@ export class ViewSettings {
             const sub = await reg?.pushManager?.getSubscription();
             await sub?.unsubscribe();
         } catch (err) {
-            console.warn("Removing the push subscription failed:", err);
+            log.warn("removing the push subscription failed:", err);
         }
 
         await this._db.clear();
@@ -211,6 +214,9 @@ export class ViewSettings {
         this._setField("info_version", version || "unknown");
         this._setField("info_commit", commit || "unknown");
         this._setField("info_build", buildDate ? new Date(buildDate).toLocaleString() : "unknown");
+        // Hash over every file of the app (chatbit -asset-hash) — compare with the GitHub release
+        const hash = (document.querySelector('meta[name="app-hash"]')?.content ?? "").toUpperCase();
+        this._setField("info_hash", hash ? hash.slice(0, 16).match(/.{4}/g).join(" ") : "unknown");
         this._setField("info_server", this._ws.isOpen() ? "connected" : "not connected");
         this._setField("info_push", "Notification" in window ? window.Notification.permission : "not supported");
         this._setField("info_sw", navigator.serviceWorker?.controller ? "active" : "not active");

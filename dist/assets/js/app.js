@@ -14,6 +14,11 @@ import {Push} from "./adapter/push.js";
 import {Expiry} from "./adapter/expiry.js";
 import {ViewSettings} from "./adapter/view_settings.js";
 import {LogoffTimer} from "./adapter/logoff.js";
+import {RoomKeys} from "./adapter/room_keys.js";
+import {ViewApproval} from "./adapter/view_approval.js";
+import {logger} from "./adapter/log.js";
+
+const log = logger("app");
 
 // Composition root: creates all adapters and views, wires them to one shared
 // EventBus and decides which page is shown on startup (login, lock or home).
@@ -24,10 +29,13 @@ export class App {
         this.db = new DatabaseAdapter(this.aes, this.events);
         this.keyStore = new KeyStore(this.aes, this.db, this.events);
         this.ws = new WebSocketAdapter(this.events, this.db, this.keyStore);
+        this.roomKeys = new RoomKeys(this.events, this.db, this.keyStore, this.aes);
+        this.db.setMessageFilter(msg => this.roomKeys.acceptMessage(msg));
         this.page = new Page(this.events);
         this.viewLock = new ViewLock(this.events, this.keyStore, this.db);
-        this.viewHome = new ViewHome(this.events, this.aes, this.keyStore, this.db, new QRScanner());
-        this.viewRoom = new ViewRoom(this.events, this.aes, this.keyStore, this.db);
+        this.viewHome = new ViewHome(this.events, this.aes, this.keyStore, this.db, new QRScanner(), this.roomKeys);
+        this.viewRoom = new ViewRoom(this.events, this.aes, this.keyStore, this.db, this.roomKeys);
+        this.viewApproval = new ViewApproval(this.events);
         this.modal = new Modal(this.events);
         this.notification = new Notification(this.events);
         this.push = new Push(this.events);
@@ -37,11 +45,13 @@ export class App {
     }
 
     async init() {
-        console.log("App init");
+        log.info("start", document.querySelector('meta[name="app-version"]')?.content || "dev");
         await this.db.init();
         await this.page.init();
         this.keyStore.init();
         this.ws.init();
+        this.roomKeys.init();
+        this.viewApproval.init();
         this.viewLock.init();
         this.viewHome.init();
         await this.viewRoom.init();
@@ -59,18 +69,26 @@ export class App {
     }
 
     _activateListener() {
-        console.log("start event listener")
+        this.events.on(Events.APP.REGISTER, (form) => this.register(form));
 
         document.addEventListener("click", (e) => {
-            console.log("click event");
-
             const btn = e.target.closest("[data-action]");
             if (!btn) return;
 
-            console.log("click", btn.dataset.action, btn.dataset.body);
+            log.debug("action", btn.dataset.action);
 
             this.events.emit(btn.dataset.action, btn.dataset.body);
         })
+
+        // No form is ever sent to the server (the CSP forbids it as well): a form with a
+        // data-submit attribute forwards itself to the event bus
+        document.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const form = e.target.closest("[data-submit]");
+            if (!form) return;
+
+            this.events.emit(form.dataset.submit, form);
+        });
 
         // Global change listener: forwards every element with a data-change attribute to the event bus
         document.addEventListener("change", (e) => {
@@ -84,15 +102,12 @@ export class App {
     async _checkIsUserLoggedIn() {
         const page = ""
 
-        console.log("Check if user is logged in");
-
         if (!this.keyStore.isUnlocked()) {
-            console.log("database is locked");
             if (!await this.db.isInitialized()) {
-                console.log("database is not initialized");
+                log.info("no profile yet, showing the registration");
                 this.events.emit(Events.CHANGE.PAGE, Pages.LOGIN);
             } else {
-                console.log("database is not initialized");
+                log.debug("profile is locked, showing the lock screen");
                 this.events.emit(Events.CHANGE.PAGE, Pages.LOCK);
                 $("#ls_alias").text("TODO");
             }
@@ -102,7 +117,7 @@ export class App {
     }
 
     async register(form) {
-        console.log("New Register");
+        log.info("registering a new profile");
 
         const password = form.querySelector('#lo_password').value;
         const alias = form.querySelector('#lo_alias').value.trim();

@@ -62,12 +62,17 @@ func TestRoomWithoutJoinSecretRejectsEveryCode(t *testing.T) {
 	assert.False(t, r.ValidMemberCode(domain.MemberCode(nil, w, testClient, "n1"), testClient, now))
 }
 
-func TestEnsureJoinSecret(t *testing.T) {
-	r := &domain.Room{}
+func TestValidMemberCodeOfAnOlderEpoch(t *testing.T) {
+	now := time.Unix(1000*domain.JoinCodePeriod+10, 0)
+	w := domain.JoinWindow(now)
+	old := domain.NewJoinSecret()
 
-	secret := r.EnsureJoinSecret()
-	assert.Len(t, secret, domain.JoinSecretSize)
-	assert.Equal(t, secret, r.EnsureJoinSecret(), "created only once")
+	// The room rotated: the current secret does not accept a code of the old one, the old one does
+	r := &domain.Room{JoinSecret: domain.NewJoinSecret()}
+	code := domain.MemberCode(old, w, testClient, "n1")
+	assert.False(t, r.ValidMemberCode(code, testClient, now))
+	assert.True(t, domain.ValidMemberCode(old, code, testClient, now))
+	assert.False(t, domain.ValidMemberCode(nil, domain.MemberCode(nil, w, testClient, "n1"), testClient, now))
 }
 
 func TestUsedJoinCodeID(t *testing.T) {

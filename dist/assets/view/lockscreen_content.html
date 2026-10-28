@@ -16,7 +16,7 @@
             </div>
 
             <div class="section mt-3 mb-5">
-                <form id="lock_submit" onsubmit="app.viewLock.unlock(this); return false;">
+                <form id="lock_submit" data-submit="lock:unlock">
 
                     <div class="form-group boxed">
                         <div class="input-wrapper">
@@ -37,38 +37,3 @@
         </div>
     </div>
     <!-- * App Capsule -->
-
-    <!-- ios style-->
-    <div id="ls_pwd_incorrect" class="notification-box">
-        <div class="notification-dialog ios-style bg-danger">
-            <div class="notification-header">
-                <div class="right">
-                    <button type="button" class="close-button" onclick="this.closest('.notification-box').classList.remove('show')" aria-label="Close">
-                        <ion-icon name="close-circle"></ion-icon>
-                    </button>
-                </div>
-            </div>
-            <div class="notification-content">
-                <div class="in">
-                    <h3 class="subtitle">Password incorrect...</h3>
-                    <div class="text">
-                        Please try it again.
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-
-<!--
- <div class="right">
-                    <button type="button" class="close-button" onclick="this.closest('.notification-box').classList.remove('show')" aria-label="Close">
-                        <ion-icon name="close-circle"></ion-icon>
-                    </button>
-                </div>
-
-
-                <a href="#" class="close-button">
-                        <ion-icon name="close-circle"></ion-icon>
-                    </a>
--->

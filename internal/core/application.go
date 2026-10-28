@@ -23,6 +23,11 @@ type DB struct {
 
 	// Join codes that were used already (kept until they expire)
 	UsedCode store.DBInternal[domain.UsedJoinCode]
+
+	// Room keys with epochs: rotation log, join requests waiting for approval, key updates
+	Rotation    store.DBMessageInternal[domain.Rotation]
+	JoinRequest store.DBMessageInternal[domain.JoinRequest]
+	KeyUpdate   store.DBMessageInternal[domain.KeyUpdate]
 }
 
 type PS struct {
@@ -42,6 +47,10 @@ func NewApplication() *Application {
 			Peer:    store.NewAdapterInternal[domain.Peer](database.NewAdapter[domain.Peer](db)),
 
 			UsedCode: store.NewAdapterInternal[domain.UsedJoinCode](database.NewAdapter[domain.UsedJoinCode](db)),
+
+			Rotation:    store.NewMessageAdapterInternal[domain.Rotation](database.NewAdapterTs[domain.Rotation](db)),
+			JoinRequest: store.NewMessageAdapterInternal[domain.JoinRequest](database.NewAdapterTs[domain.JoinRequest](db)),
+			KeyUpdate:   store.NewMessageAdapterInternal[domain.KeyUpdate](database.NewAdapterTs[domain.KeyUpdate](db)),
 		},
 		PS: PS{
 			Message: pubsub.NewAdapter[uuid.UUID, domain.Message](),

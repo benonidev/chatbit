@@ -1,4 +1,7 @@
 import {Events} from "./event.js";
+import {logger} from "./log.js";
+
+const log = logger("logoff");
 
 // Minutes of inactivity until the app logs off, "0" (or nothing stored) means never
 export const LOGOFF_KEY = "ChatbitLogoffMinutes";
@@ -50,7 +53,7 @@ export class LogoffTimer {
         if (minutes === 0 || !this._keyStore.isUnlocked()) return;
         if (Date.now() - this._lastActivity < minutes * 60 * 1000) return;
 
-        console.log(`Logoff after ${minutes} min without activity`);
+        log.info(`logging off after ${minutes} min without activity`);
         this._keyStore.lock();
         location.reload(); // key store is empty → lock screen
     }

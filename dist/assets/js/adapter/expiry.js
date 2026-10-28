@@ -1,4 +1,7 @@
 import {Events} from "./event.js";
+import {logger} from "./log.js";
+
+const log = logger("expiry");
 
 // The only shorter TTLs a message can have (same as MessageTTLSteps on the server): a freely
 // chosen TTL is visible to the server and would mark all messages of one person.
@@ -60,7 +63,7 @@ export class Expiry {
                 this._events.emit(Events.CHAT.MESSAGES_EXPIRED, expired);
             }
         } catch (err) {
-            console.error("Removing expired messages failed:", err);
+            log.error("removing expired messages failed:", err);
         } finally {
             this._running = false;
         }

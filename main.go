@@ -5,6 +5,8 @@ import (
 	"chatbit/internal/core"
 	"chatbit/internal/domain"
 	"chatbit/internal/port"
+	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -18,6 +20,19 @@ var (
 )
 
 func main() {
+	// chatbit -asset-hash: prints the hash of the web app in ./dist (the one the app shows before
+	// an update) — to compare a server or a release with the source
+	assetHash := flag.Bool("asset-hash", false, "print the hash of ./dist and exit")
+	flag.Parse()
+	if *assetHash {
+		hash, err := port.AssetHash(port.StaticPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(hash)
+		return
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 

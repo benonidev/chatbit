@@ -3,28 +3,32 @@ import {Pages} from "./page.js";
 import {Message} from "../domain/message.js";
 import {File, formatBytes} from "../domain/file.js";
 import {Modals} from "./modal.js";
-import {Room} from "../domain/room.js";
 import {InviteCode} from "./invite.js";
 import {formatDuration, formatTTL, MESSAGE_TTL_STEPS, snapTTL} from "./expiry.js";
-import {inviteCode, joinWindow, joinWindowEnd} from "./join_code.js";
 import {idHue} from "./color.js";
+import {b64, fingerprint} from "./room_crypto.js";
 import {Notifications} from "./notification.js";
+import {logger} from "./log.js";
+
+const log = logger("room");
 
 const CHUNK_SIZE = 64 * 1024; // 64KB
 
 // Chat room page: renders messages, encrypts and sends text and images, loads images on demand
-// and handles the room actions (share, edit, clean, leave).
+// and handles the room actions (share, members, edit, clean, leave). Every message is encrypted
+// with the keys of its epoch and signed by its sender (RoomKeys, docs/room-keys.md).
 export class ViewRoom {
-    constructor(events, aes, keyStore, db) {
+    constructor(events, aes, keyStore, db, roomKeys) {
         this._events = events;
         this._aes   = aes;
         this._db   = db;
         this._keyStore = keyStore;
+        this._roomKeys = roomKeys;
         this._invite = new InviteCode(aes);
 
         this._roomId = null;
+        this._room = null;        // the open Room (status, epoch)
         this._roomTimestamp = null;
-        this._roomKey = null;
         this._roomTTL = null;     // maximum TTL of the room (seconds), fixed when the room was created
         this._sendTTL = 0;        // TTL of own messages (edit dialog "Delete after"), 0 = room TTL
         this._roomName = null;
@@ -35,34 +39,89 @@ export class ViewRoom {
         this._share = null;     // share dialog: {code, expires, render} of the shown invite code
         this._shareUrl = null;
         this._roomNotification = null;
+        this._replyTo = null;   // id of the message the next text answers (reply bar)
 
-        this._alias = null;
-        this._aliasId = null;
     }
 
     async init() {
         this._events.on(Events.WS.RECEIVED_MESSAGE, async (msg) => {
-            if (msg.isRoom(this._roomId)) {
-                console.log("WS Message received");
-                console.log(msg);
+            if (!msg.isRoom(this._roomId) || !msg.isVisible()) return;
 
-
-                const aliasId = await this._aes.decrypt(msg.aliasId, this._roomKey);
-
-                console.log(msg);
-                if (aliasId === this._aliasId){
-                    console.log("Own message received");
-
-                    this._updateStatusHTML(msg);
-                    this._markRead(msg.timestamp); // the server timestamp may be newer than the local one
-                }else{
-                    console.log("Message received from WS");
-                    await this._newMessage(msg);
-                }
-
-                this._scrollToBottom();
+            // The echo of an own message only updates its status
+            if (document.getElementById(msg.id)) {
+                this._updateStatusHTML(msg);
+                this._markRead(msg.timestamp); // the server timestamp may be newer than the local one
+            } else {
+                await this._newMessage(msg);
             }
+
+            this._scrollToBottom();
         });
+
+        // "Alice added Dave" — written by RoomKeys
+        this._events.on(Events.CHAT.SYSTEM_MESSAGE, async (msg) => {
+            if (!msg.isRoom(this._roomId) || !this._onRoomPage) return;
+            await this._newMessage(msg);
+            this._scrollToBottom();
+        });
+
+        // New epoch or status of the open room: messages of the new epoch can be read now
+        const refresh = async (roomId) => {
+            if (roomId !== this._roomId || !this._onRoomPage) return;
+            this._room = await this._db.getRoom(roomId);
+            if (!this._room) {
+                this._events.emit(Events.CHANGE.PAGE, Pages.HOME);
+                return;
+            }
+            this._renderRoomState();
+            this._renderRoomInfo();
+            this._cleanActiveRoom();
+            if (await this._getLatestMessages()) this._scrollToBottom();
+        };
+        this._events.on(Events.ROOM.ROTATED, ({roomId}) => refresh(roomId));
+        this._events.on(Events.ROOM.CHANGED, (roomId) => refresh(roomId));
+
+        this._events.on(Events.ROOM.SHOW_MEMBERS, async () => {
+            await this._showMembers();
+        });
+
+        this._events.on(Events.ROOM.SHOW_HISTORY, async () => {
+            await this._showHistory();
+        });
+
+        this._events.on(Events.ROOM.SHOW_SECURITY, async () => {
+            await this._showSecurity();
+        });
+
+        // From the security page to members / key history: one modal after the other
+        this._events.on(Events.ROOM.SECURITY_GOTO, (target) => {
+            const el = document.getElementById(Modals.ROOM.SECURITY);
+            el?.addEventListener("hidden.bs.modal", () => {
+                if (target === "members") this._showMembers();
+                if (target === "history") this._showHistory();
+            }, {once: true});
+            this._events.emit(Events.MODAL.CLOSE, Modals.ROOM.SECURITY);
+        });
+
+        this._events.on(Events.ROOM.REMOVE_MEMBER, async (memberId) => {
+            await this._removeMember(memberId);
+        });
+
+        // A tap on a message shows who sent it (fingerprint, signature) — not on its buttons
+        // (image, document) or the quote of a reply
+        document.addEventListener("click", (e) => {
+            const content = e.target.closest("#ct_room .message-item .content");
+            if (!content || e.target.closest("button, a, [data-action]")) return;
+            this._showMessageInfo(content.id).catch(err => log.error("message info failed:", err));
+        });
+
+        this._events.on(Events.CHAT.REPLY, async (messageId) => {
+            await this._setReply(messageId);
+        });
+
+        this._events.on(Events.CHAT.CANCEL_REPLY, () => this._setReply(null));
+
+        this._events.on(Events.CHAT.JUMP_TO, (messageId) => this._jumpTo(messageId));
 
         this._events.on(Events.CHAT.SEND_MESSAGE, async (msg) => {
             await this.sendMessage();
@@ -92,24 +151,18 @@ export class ViewRoom {
             try {
                 await this._downloadDocument(fileId);
             } catch (error) {
-                console.error(`Failed to load file ${fileId}:`, error.message);
+                log.error("loading a file failed:", error.message);
                 this._events.emit(Notifications.WARNING, {header: "Document", msg: "The document could not be loaded."});
             }
         });
 
         this._events.on(Events.CHAT.OPEN_IMAGE, async (fileId) => {
-            console.log(`Open File with ID: ${fileId}`);
-
             try {
                 let file = await this.getOrRequestFile(fileId);
-                console.log(file);
-
-
-
                 await this.showImageModal(file);
             } catch (error) {
                 // Handles network/transfer errors and timeouts in one place
-                console.error(`Failed to load file ${fileId}:`, error.message);
+                log.error("loading a file failed:", error.message);
             }
 
         });
@@ -121,28 +174,24 @@ export class ViewRoom {
         });
 
         this._events.on(Events.CHAT.EDIT_ACTIVE_ROOM, async (msg) => {
-            console.log("Edit Active Room");
             this._events.emit(Events.MODAL.OPEN, Modals.ROOM.EDIT_ROOM);
             this._fillEditRoomModal();
         });
 
         this._events.on(Events.CHAT.UPDATE_ACTIVE_ROOM, async (msg) => {
-            console.log("Update Active Room");
             this._events.emit(Events.MODAL.CLOSE, Modals.ROOM.EDIT_ROOM);
             await this._updateRoomFromModal();
         });
 
         this._events.on(Events.CHAT.LEAVE_ACTIVE_ROOM_ASK, async (msg) => {
-            console.log("Leave Active Room Ask");
             this._events.emit(Events.MODAL.OPEN, Modals.ROOM.LEAVE_ROOM);
         });
 
         this._events.on(Events.CHAT.LEAVE_ACTIVE_ROOM, async (msg) => {
-            console.log("Leave Active Room");
+            log.debug("leave room", this._roomId);
 
-            await this._leaveRoom(this._roomId);
-
-            this._events.emit(Events.WS.LEAVE_ROOM, this._roomId);
+            // Tells the others (they rotate without this device) and deletes the room here
+            await this._roomKeys.leave(this._roomId);
 
             this._events.emit(Events.CHANGE.PAGE, Pages.HOME);
         });
@@ -152,18 +201,25 @@ export class ViewRoom {
         });
 
         this._events.on(Events.CHAT.CLEAN_ACTIVE_ROOM, async (msg) => {
-            console.log("Clean Active Room DB ID:", this._roomId);
+            log.debug("clean room on this device", this._roomId);
             await this._db.cleanRoom(this._roomId);
-            console.log("Clean Active Room");
             this._cleanActiveRoom();
         });
 
-        // The server forwards the clean to the other members (offline ones get it on their next join)
+        // The server forwards the clean to the other members (offline ones get it on their next join).
+        // A signed message right after it tells everybody who cleared the chat.
         this._events.on(Events.CHAT.CLEAN_ACTIVE_ROOM_SERVER, async (msg) => {
-            console.log("Clean Active Room everywhere:", this._roomId);
+            log.debug("clean room everywhere", this._roomId);
             this._events.emit(Events.WS.CLEAN_ROOM, this._roomId);
             await this._db.cleanRoom(this._roomId);
             this._cleanActiveRoom();
+
+            const notice = await this._roomKeys.encryptMessage(this._roomId, {
+                type: Message.TYPE_CLEAN, content: "", ttl: this._effectiveRoomTTL(), store: this._roomStore,
+            });
+            if (!notice) return;
+            await this._newMessage(notice);
+            this._events.emit(Events.WS.SEND_MESSAGE, notice);
         });
 
         // Another member cleaned the room — show what is left (messages newer than the clean)
@@ -204,33 +260,29 @@ export class ViewRoom {
         this._events.on(Events.CHAT.TICK, (now) => this._updateRemainingTimes(now));
 
         this._events.on(Events.STATE.ROOM, async (roomId) => {
-            console.log("View Room", roomId);
-
-            this._roomId = roomId;
-            this._roomKey = await this._keyStore.getRoomKey(roomId);
-
+            log.debug("open room", roomId);
 
             const room = await this._db.getRoom(roomId);
+            if (!room) return;
 
-            console.log("Get Room from DB");
+            this._roomId = roomId;
+            this._room = room;
             this._roomTTL   = room.ttl;
             this._sendTTL   = this._clampSendTTL(room.messageTTL || 0); // older free values → step
             this._roomStore = room.store;
             this._roomNotification = room.pushNotifications;
             this._roomName = await this._aes.decrypt(room.name, this._keyStore.getMasterKey());
-
-            const profile = await this._db.getProfile();
-            this._alias = profile.name;
-            this._aliasId = profile.uid;
+            this._replyTo = null; // the reply bar belongs to the room it was opened in
 
             this._events.emit(Events.CHANGE.PAGE, Pages.ROOM);
         });
 
+        // Image / document entry of the footer menu opens the hidden file input
+        this._events.on(Events.CHAT.PICK_FILE, (inputId) => document.getElementById(inputId)?.click());
+
         document.addEventListener('submit', (e) => {
             if (e.target.id === 'send_message_form') {
                 e.preventDefault();
-                console.log("Send Message");
-
                 this.sendMessage();
             }
         });
@@ -239,8 +291,6 @@ export class ViewRoom {
             this._onRoomPage = pageName === Pages.ROOM;
 
             if(pageName === Pages.ROOM){
-                console.log("View Room Page");
-
                 // textContent: the room name comes from the invite code of another user
                 document.getElementById('ro_room_name').textContent = this._roomName;
 
@@ -252,6 +302,7 @@ export class ViewRoom {
                 header.style.setProperty('--room-hue', hue);
                 document.getElementById('appContent').style.setProperty('--room-hue', hue);
                 this._renderRoomInfo();
+                this._renderRoomState();
 
                 this._cleanActiveRoom();
 
@@ -271,21 +322,14 @@ export class ViewRoom {
 
         this._sendTTL = this._clampSendTTL(Number(messageTTL.value) || 0);
 
-        const updateRoom = new Room({
-            id: this._roomId,
+        // Only local settings — TTL and store are fixed since the room was created
+        await this._db.updateRoomFields(this._roomId, {
             name: await this._aes.encrypt(roomName.value, this._keyStore.getMasterKey()),
-            key: await this._aes.encrypt(await this._aes.exportKey(this._roomKey), this._keyStore.getMasterKey()),
             pushNotifications: roomNotification.checked,
-            store: this._roomStore, // fixed since the room was created, like the TTL
-            ttl: this._roomTTL, // fixed since the room was created, the server ignores any other value
-            messageTTL: this._sendTTL
-        })
+            messageTTL: this._sendTTL,
+        });
 
-        console.log(updateRoom);
-
-        await this._db.updateRoom(updateRoom);
-
-        this._events.emit(Events.STATE.ROOM, updateRoom.id);
+        this._events.emit(Events.STATE.ROOM, this._roomId);
     }
 
     _fillEditRoomModal(){
@@ -311,21 +355,14 @@ export class ViewRoom {
         messageTTL.value = String(this._sendTTL || 0);
     }
 
-    // Invite code of the open room with a new join code, encrypted with the PIN if one is given.
-    // Returns {code, expires}; expires is null if the room has no join secret (not connected to
-    // the server yet) — the server will not accept such a code.
+    // Invite code of the open room with a new invite code and invite secret, encrypted with the
+    // PIN if one is given. Returns {code, expires}; code is null if the room has no epoch yet
+    // (not connected to the server yet) or this device is no member.
     async _inviteCode(pin) {
-        const joinKey = await this._keyStore.getJoinKey(this._roomId);
-        const window = joinWindow();
+        const created = await this._roomKeys.newInvite(this._roomId);
+        if (!created) return {code: null, expires: null};
 
-        const code = await this._invite.encode({
-            i: this._roomId,
-            n: this._roomName,
-            k: await this._aes.exportKey(this._roomKey),
-            c: joinKey ? await inviteCode(joinKey, window) : "",
-        }, pin);
-
-        return {code, expires: joinKey ? joinWindowEnd(window) : null};
+        return {code: await this._invite.encode(created.invite, pin), expires: created.expires};
     }
 
     // Copies the code shown in the share dialog (a new one if it has expired)
@@ -333,7 +370,7 @@ export class ViewRoom {
         const modalEl = document.getElementById(Modals.ROOM.SHARE_ROOM);
         const copyBtn = modalEl.querySelector('[data-field="copy_btn"]');
 
-        if (!this._share) return;
+        if (!this._share?.code) return;
         if (this._share.expires !== null && Date.now() >= this._share.expires) await this._share.render();
 
         await navigator.clipboard.writeText(this._share.code);
@@ -360,7 +397,7 @@ export class ViewRoom {
         const tick = () => {
             if (!this._share) return;
             if (this._share.expires === null) {
-                validityEl.textContent = "Not usable yet — this room is not connected to the server";
+                validityEl.textContent = "Not usable yet — this room is not connected to the server or you are no member";
                 expiredEl.classList.add("d-none");
                 return;
             }
@@ -382,6 +419,10 @@ export class ViewRoom {
             this._share = {code, expires, render};
 
             qrContainer.innerHTML = "";
+            if (!code) {
+                tick();
+                return;
+            }
             new QRCode(qrContainer, {
                 text: code,
                 width: 280,
@@ -420,11 +461,6 @@ export class ViewRoom {
         this._events.emit(Events.MODAL.OPEN, Modals.ROOM.SHARE_ROOM);
     }
 
-    async _leaveRoom(roomId){
-        this._db.cleanRoom(roomId);
-        this._db.removeRoom(roomId);
-    }
-
     async sendFile() {
         const input = document.getElementById("ct_img_input");
         if (input.files.length === 0) return;
@@ -433,8 +469,7 @@ export class ViewRoom {
         input.value = ""; // the same file can be chosen again
 
         // Type and size of the image that is sent (after scaling), shown in the bubble
-        const content = JSON.stringify({type: file.type, size: file.size});
-        await this._sendFileMessage(file, Message.TYPE_IMAGE, await this._aes.encryptPadded(content, this._roomKey));
+        await this._sendFileMessage(file, Message.TYPE_IMAGE, {type: file.type, size: file.size});
     }
 
     // Any file (PDF, Word, ...). Name and size are sent encrypted in the message content,
@@ -446,14 +481,18 @@ export class ViewRoom {
         const file = input.files[0];
         input.value = "";
 
-        const content = JSON.stringify({name: file.name.slice(0, 200), size: file.size});
-        await this._sendFileMessage(file, Message.TYPE_FILE, await this._aes.encryptPadded(content, this._roomKey));
+        await this._sendFileMessage(file, Message.TYPE_FILE, {name: file.name.slice(0, 200), size: file.size});
     }
 
-    // Encrypts the file, stores it locally and sends the message plus the file chunks
-    async _sendFileMessage(file, type, content) {
+    // Encrypts the file with the file key of the current epoch, stores it locally and sends the
+    // message plus the file chunks. info ({type?, name?, size}) goes into the signed content
+    // together with the hash of the encrypted file, so nobody can swap the file on the server.
+    async _sendFileMessage(file, type, info) {
+        const current = await this._roomKeys.currentKeys(this._roomId);
+        if (!current) return this._notMemberYet();
+
         // Sizes of the encrypted (padded) data — that is what is sent
-        const blob = await this._aes.encryptFile(file, this._roomKey);
+        const blob = await this._aes.encryptFile(file, current.keys.fileKey);
         const totalChunks = Math.ceil(blob.byteLength / CHUNK_SIZE);
 
         // Limit of the server (MAX_FILE_SIZE_MB) — it would reject the upload
@@ -466,20 +505,12 @@ export class ViewRoom {
             return;
         }
 
-        const msg = new Message({
-            id: crypto.randomUUID(),
-            roomId: this._roomId,
-            alias: await this._aes.encryptPadded(this._alias, this._roomKey),
-            aliasId: await this._aes.encryptPadded(this._aliasId, this._roomKey),
-            content: content,
-            timestamp: Date.now(),
-            type: type,
-            synced: false,
-            chunkSize: CHUNK_SIZE,
-            chunksTotal: totalChunks,
-            ttl: this._messageTTL(),
-            store: this._roomStore
+        const hash = b64(new Uint8Array(await crypto.subtle.digest("SHA-256", blob)));
+        const msg = await this._roomKeys.encryptMessage(this._roomId, {
+            type, content: JSON.stringify({...info, hash}),
+            chunkSize: CHUNK_SIZE, chunksTotal: totalChunks, ttl: this._messageTTL(), store: this._roomStore,
         });
+        if (!msg) return this._notMemberYet();
 
         const fileM = new File({
             id: msg.id,
@@ -500,21 +531,45 @@ export class ViewRoom {
         this._events.emit(Events.WS.SEND_MESSAGE, msg);
     }
 
+    // Decrypts the file of a message with the file key of the message's epoch and checks it
+    // against the hash in the signed message. Returns {blob, info}.
+    async _openFile(file) {
+        const row = await this._db.getMessage(file.id);
+        if (!row) throw new Error("message of the file is missing");
+
+        const msg = Message.fromDB(row);
+        const plain = await this._roomKeys.decryptMessage(msg);
+        const keys = await this._roomKeys.keysOf(msg.roomId, msg.epoch);
+        if (!plain || !keys) throw new Error("no keys for the epoch of the file");
+
+        let info = {};
+        try {
+            info = JSON.parse(plain.content) ?? {};
+        } catch { /* no info */ }
+
+        if (info.hash) {
+            const hash = b64(new Uint8Array(await crypto.subtle.digest("SHA-256", file.blob)));
+            if (hash !== info.hash) throw new Error("file does not match its message");
+        }
+
+        return {blob: await this._aes.decryptFileBlob(file.blob, file.mimeType, keys.fileKey), info};
+    }
+
+    _notMemberYet() {
+        this._events.emit(Notifications.WARNING, {
+            header: "Not a member yet",
+            msg: "You can send messages once a member approved your join request.",
+        });
+    }
+
     // Loads the document (from the device or the server), decrypts it and saves it under its
     // original name. The browser shows its usual download; on iPhone it opens the preview,
     // from where it can be saved to Files or opened in Word, a PDF viewer, ...
     async _downloadDocument(fileId) {
         // Documents can be much larger than images — give the download more time
         const file = await this.getOrRequestFile(fileId, 120 * 1000);
-        const blob = await this._aes.decryptFileBlob(file.blob, file.mimeType, this._roomKey);
-
-        let name = "document";
-        const row = await this._db.getMessage(fileId);
-        if (row?.content) {
-            try {
-                name = JSON.parse(await this._aes.decrypt(row.content, this._roomKey)).name || name;
-            } catch { /* keep the generic name */ }
-        }
+        const {blob, info} = await this._openFile(file);
+        const name = info.name || "document";
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -533,7 +588,7 @@ export class ViewRoom {
             return cachedFile;
         }
 
-        console.log(`File is not in DB present requesting file ${fileId}`);
+        log.debug("requesting file from the server", fileId);
 
         // 2. Wait for the transfer event and expose the result as a promise
         return new Promise((resolve, reject) => {
@@ -572,7 +627,7 @@ export class ViewRoom {
         try {
             bitmap = await createImageBitmap(file);
         } catch (e) {
-            console.warn('Image decode failed, sending original:', file.type, e);
+            log.warn("image decode failed, sending the original:", file.type, e);
             return file;
         }
 
@@ -611,22 +666,13 @@ export class ViewRoom {
             return
         }
 
-        let timeStamp = new Date();
-
-        let msg = new Message({
-            id: crypto.randomUUID(),
-            roomId: this._roomId,
-            alias: await this._aes.encryptPadded(this._alias, this._roomKey),
-            aliasId: await this._aes.encryptPadded(this._aliasId, this._roomKey),
-            content: await this._aes.encryptPadded(msgRaw, this._roomKey),
-            timestamp: timeStamp.getTime(),
-            type: Message.TYPE_TEXT,
-            synced: false,
-            ttl: this._messageTTL(),
-            store: this._roomStore
+        const msg = await this._roomKeys.encryptMessage(this._roomId, {
+            type: Message.TYPE_TEXT, content: msgRaw, replyTo: this._replyTo, ttl: this._messageTTL(), store: this._roomStore,
         });
+        if (!msg) return this._notMemberYet();
 
         document.getElementById("ct_msg_input").value = "";
+        await this._setReply(null);
 
         await this._newMessage(msg);
 
@@ -650,42 +696,64 @@ export class ViewRoom {
     _markRead(timestamp) {
         if (!this._onRoomPage || !timestamp) return;
         this._db.markRoomRead(this._roomId, timestamp)
-            .catch(err => console.error("Marking room as read failed:", err));
+            .catch(err => log.error("marking room as read failed:", err));
     }
 
     async _renderMessage(msg) {
-        if (msg.alias === undefined || msg.isExpired()) {
+        if (msg.isExpired() || !msg.isVisible()) return;
+
+        // Already shown (e.g. a message from the WebSocket arrived while the room was loading)
+        if (document.getElementById(msg.id)) return;
+
+        if (msg.isSystem()) {
+            const text = await this._keyStore.openLocal(msg.content);
+            if (document.getElementById(msg.id)) return;
+            document.getElementById('ct_room').insertAdjacentHTML('beforeend',
+                `<div class="message-divider system-message" id="${msg.id}">${msg._escape(text)}</div>`);
             return;
         }
 
-        console.log("Rendering message", msg);
+        if (msg.aliasId === undefined) return; // marker of a clean
 
-        const alias = await this._aes.decrypt(msg.alias, this._roomKey);
-        const aliasId = await this._aes.decrypt(msg.aliasId, this._roomKey);
+        // null: this device has no keys of the message's epoch (yet)
+        const plain = await this._roomKeys.decryptMessage(msg);
+        if (!plain) return;
 
-        let content;
-
-        // Text, or the {type, size} info of images and documents (older images have no content)
-        if (msg.content) {
-            content = await this._aes.decrypt(msg.content, this._roomKey);
+        // Not signed by the member it claims to come from — it is deleted, never shown. (Checked
+        // before storing already, this catches messages that came before the keys of their epoch.)
+        if (!plain.verified) {
+            log.warn("message dropped: signature not valid", msg.id);
+            await this._db.deleteMessage(msg.id);
+            return;
         }
 
-        const isOwn    = aliasId === this._aliasId;
-        const bubble   = msg._renderBubble(content);
-        const status   = isOwn ? msg._renderStatus() : '';
-        const title    = !isOwn
-            ? `<div class="title alias-color" style="--alias-hue: ${idHue(aliasId)}" alias-id="${msg._escape(aliasId)}">${msg._escape(alias)}</div>`
-            : '';
+        if (msg.isClean()) {
+            const who = plain.own ? "You" : msg._escape(plain.alias);
+            if (document.getElementById(msg.id)) return;
+            document.getElementById('ct_room').insertAdjacentHTML('beforeend',
+                `<div class="message-divider system-message" id="${msg.id}">${who} cleared the chat for everyone</div>`);
+            return;
+        }
 
-        // Already shown (e.g. a message from the WebSocket arrived while the room was loading)
+        const isOwn    = plain.own;
+        const bubble   = msg._renderBubble(plain.content);
+        const status   = isOwn ? msg._renderStatus() : '';
+        // Only messages with a valid signature are shown — the mark says so
+        const signed   = `<ion-icon name="shield-checkmark-outline" class="msg-signed" title="Signed by ${msg._escape(plain.alias)}"></ion-icon>`;
+        const title    = !isOwn
+            ? `<div class="title alias-color" style="--alias-hue: ${idHue(plain.senderId)}" alias-id="${msg._escape(plain.senderId)}">${msg._escape(plain.alias)}</div>`
+            : '';
+        const quote    = plain.replyTo ? await this._quoteHTML(plain.replyTo) : '';
+
         if (document.getElementById(msg.id)) return;
 
         document.getElementById('ct_room').insertAdjacentHTML('beforeend', `
         <div class="message-item${isOwn ? ' user' : ''}">
             <div id="${msg.id}" class="content">
                 ${title}
+                ${quote}
                 <div class="bubble text-line-break">${bubble}</div>
-                <div class="footer">${msg.formattedTime} ${this._ttlHTML(msg)} ${status}</div>
+                <div class="footer">${signed} ${msg.formattedTime} ${this._ttlHTML(msg)} ${status}</div>
             </div>
         </div>`);
     }
@@ -790,7 +858,7 @@ export class ViewRoom {
     _removeMessageHTML(messageId) {
         const content = document.getElementById(messageId);
         if (!content) return;
-        content.closest('.message-item').remove();
+        (content.closest('.message-item') ?? content).remove();
 
         // Remove date dividers that have no messages left
         document.querySelectorAll('#ct_room .message-divider').forEach(divider => {
@@ -799,22 +867,28 @@ export class ViewRoom {
         });
     }
 
-    // Room TTL under the room name, e.g. "⏱ max 1 h"
-    // Header line under the room name: maximum lifetime and whether messages are kept on the server
-    _renderRoomInfo() {
+    // Header line above the room name: security status (tap: security page), maximum lifetime
+    // and whether messages are kept on the server
+    async _renderRoomInfo() {
         const el = document.getElementById('ro_room_ttl');
         if (!el) return;
+
+        const info = await this._roomKeys.securityInfo(this._roomId);
+        const secure = info?.epoch > 0;
+        const security = `<a href="#" class="room-security" data-action="room:show_security" title="Security of this room">` +
+            `<ion-icon name="${secure ? "lock-closed" : "lock-open-outline"}"></ion-icon>` +
+            (secure ? ` E${info.epoch} · <ion-icon name="people-outline"></ion-icon> ${info.members}` : " not ready") + `</a>`;
 
         const store = this._roomStore
             ? `<span class="room-store" title="Keep on Server: messages are kept encrypted on the server"><ion-icon name="cloud-done-outline"></ion-icon> server</span>`
             : `<span class="room-store" title="Keep on Server is off: only members who are online receive messages"><ion-icon name="cloud-offline-outline"></ion-icon> live only</span>`;
 
-        el.innerHTML = `<ion-icon name="timer-outline"></ion-icon> max ${formatTTL(this._effectiveRoomTTL())}${store}`;
+        el.innerHTML = `${security}<span class="room-store"><ion-icon name="timer-outline"></ion-icon> max ${formatTTL(this._effectiveRoomTTL())}</span>${store}`;
     }
 
 
     async showImageModal(file) {
-        const blob = await this._aes.decryptFileBlob(file.blob, file.mimeType, this._roomKey);
+        const {blob} = await this._openFile(file);
         const url = URL.createObjectURL(blob);
 
         const img = document.querySelector('#ct_image img');
@@ -843,6 +917,237 @@ export class ViewRoom {
         $("#ct_image").modal('show');
     }
 
+    // -------------------------------------------------------------------------
+    // Room state and members
+    // -------------------------------------------------------------------------
+
+    // Banner above the chat while waiting for approval or after being removed; sending is
+    // disabled then
+    async _renderRoomState() {
+        const el = document.getElementById("ro_room_state");
+        if (!el || !this._room) return;
+
+        const own = await this._roomKeys.ownMemberId(this._roomId);
+        const text = this._room.isPending()
+            ? `Waiting for approval — the member who invited you has to accept your request. Your fingerprint: ${own ? fingerprint(own) : "?"}`
+            : this._room.isRemoved() ? "You are no member of this room anymore." : "";
+
+        el.textContent = text;
+        el.hidden = !text;
+
+        // The chat starts below the banner, otherwise it covers the first messages
+        const chat = document.getElementById("ct_room");
+        if (chat) chat.style.top = text ? `calc(56px + env(safe-area-inset-top) + ${el.offsetHeight}px)` : "";
+        document.querySelectorAll('#send_message_form textarea, #send_message_form button').forEach(b => {
+            b.disabled = !!text;
+        });
+    }
+
+    // Member list of the current epoch: alias, fingerprint (compare in person), key age
+    async _showMembers() {
+        const members = await this._roomKeys.members(this._roomId);
+        const own = members.find(m => m.own);
+        const list = document.querySelector(`[id="${Modals.ROOM.MEMBERS}"] [data-field="members"]`);
+        if (!list) return;
+
+        const days = ms => ms === null ? "" : `key ${Math.floor(ms / 86400000)} days old`;
+        list.innerHTML = members.map(m => `
+            <li>
+                <div class="in">
+                    <div>
+                        <strong class="alias-color" style="--alias-hue: ${idHue(m.memberId)}">${escapeHTML(m.alias || "?")}</strong>${m.own ? " (you)" : ""}
+                        <div class="text-muted small"><code>${m.fingerprint}</code> · ${days(m.keyAge)}</div>
+                    </div>
+                    ${m.own ? "" : `<button type="button" class="btn btn-sm btn-outline-danger" data-action="room:remove_member" data-body="${m.memberId}">Remove</button>`}
+                </div>
+            </li>`).join("") || `<li class="text-muted">No members known yet</li>`;
+
+        const ownEl = document.querySelector(`[id="${Modals.ROOM.MEMBERS}"] [data-field="own_fingerprint"]`);
+        if (ownEl) ownEl.textContent = own?.fingerprint ?? "";
+
+        this._events.emit(Events.MODAL.OPEN, Modals.ROOM.MEMBERS);
+    }
+
+    // -------------------------------------------------------------------------
+    // Message info, verification and replies
+    // -------------------------------------------------------------------------
+
+    // A shown message, decrypted and checked: {msg, plain} — null if it is gone or not valid
+    async _openShown(messageId) {
+        const row = await this._db.getMessage(messageId);
+        if (!row) return null;
+        const msg = Message.fromDB(row);
+        const plain = await this._roomKeys.decryptMessage(msg);
+        return plain?.verified ? {msg, plain} : null;
+    }
+
+    // Who sent the message: alias, fingerprint (compare in person), valid signature — and "Reply"
+    async _showMessageInfo(messageId) {
+        const shown = await this._openShown(messageId);
+        if (!shown) return;
+        const {msg, plain} = shown;
+
+        const modalEl = document.getElementById(Modals.ROOM.MESSAGE);
+        const field = name => modalEl.querySelector(`[data-field="${name}"]`);
+
+        const aliasEl = field("alias");
+        aliasEl.textContent = plain.own ? `${plain.alias} (you)` : plain.alias; // alias of another user: text only
+        aliasEl.style.setProperty("--alias-hue", idHue(plain.senderId));
+        field("time").textContent = msg.date.toLocaleString();
+        field("fingerprint").textContent = fingerprint(plain.senderId);
+        field("reply").dataset.body = msg.id;
+
+        this._events.emit(Events.MODAL.OPEN, Modals.ROOM.MESSAGE);
+    }
+
+    // Short text of a message for quotes: {alias, senderId, text} — null if it is not on this
+    // device (anymore) or not valid. Taken from the own copy, never from the reply: nobody can put
+    // words into someone else's mouth.
+    async _quoteOf(messageId) {
+        const shown = await this._openShown(messageId);
+        if (!shown) return null;
+        const {msg, plain} = shown;
+
+        let text = plain.content;
+        if (msg.isImage()) text = "Image";
+        if (msg.isFile()) text = "Document";
+        if (text.length > 100) text = text.slice(0, 100) + "…";
+        return {alias: plain.own ? "You" : plain.alias, senderId: plain.senderId, text};
+    }
+
+    async _quoteHTML(messageId) {
+        const q = await this._quoteOf(messageId);
+        if (!q) return `<div class="msg-reply missing">Reply to a message that is not available</div>`;
+        return `<a href="#" class="msg-reply" data-action="chat:jump_to" data-body="${escapeHTML(messageId)}" style="--alias-hue: ${idHue(q.senderId)}">` +
+            `<strong class="alias-color">${escapeHTML(q.alias)}</strong>${escapeHTML(q.text)}</a>`;
+    }
+
+    // Shows (messageId) or hides (null) the bar of the message the next text answers
+    async _setReply(messageId) {
+        const bar = document.getElementById("ct_reply");
+        const q = messageId ? await this._quoteOf(messageId) : null;
+        this._replyTo = q ? messageId : null;
+        if (!bar) return;
+
+        bar.hidden = !q;
+        if (!q) return;
+        const alias = bar.querySelector('[data-field="alias"]');
+        alias.textContent = q.alias;
+        bar.querySelector('[data-field="text"]').textContent = q.text;
+        document.getElementById("ct_msg_input")?.focus();
+    }
+
+    _jumpTo(messageId) {
+        const el = document.getElementById(messageId);
+        if (!el) return;
+        el.scrollIntoView({behavior: "smooth", block: "center"});
+        el.classList.add("msg-flash");
+        setTimeout(() => el.classList.remove("msg-flash"), 1500);
+    }
+
+    // Security page: status of the room, how the keys work and what to take care of
+    async _showSecurity() {
+        const info = await this._roomKeys.securityInfo(this._roomId);
+        const el = document.querySelector(`[id="${Modals.ROOM.SECURITY}"] [data-field="status"]`);
+        if (!el) return;
+
+        if (info?.epoch > 0) {
+            const since = info.since ? new Date(info.since).toLocaleString() : "";
+            el.innerHTML = `
+                <div class="security-ok"><ion-icon name="lock-closed"></ion-icon> End-to-end encrypted</div>
+                <div class="small">Epoch <strong>${info.epoch}</strong>${since ? ` · since ${escapeHTML(since)}` : ""}
+                    · <strong>${info.members}</strong> member${info.members === 1 ? "" : "s"} can read new messages</div>
+                <div class="small text-muted">Your fingerprint: <code>${escapeHTML(info.fingerprint)}</code></div>`;
+        } else {
+            const text = info?.status === "pending" ? "Waiting for approval — you have no epoch key yet."
+                : info?.status === "removed" ? "You are no member anymore — you get no new keys."
+                : "Not connected yet — the first epoch key is made when the room is on the server.";
+            el.innerHTML = `<div class="security-wait"><ion-icon name="lock-open-outline"></ion-icon> ${text}</div>
+                ${info ? `<div class="small text-muted">Your fingerprint: <code>${escapeHTML(info.fingerprint)}</code></div>` : ""}`;
+        }
+
+        this._events.emit(Events.MODAL.OPEN, Modals.ROOM.SECURITY);
+    }
+
+    // Key history: a timeline of the epochs, newest first. Tapping one shows its members, the
+    // hashes of the chain and how many of its messages are on this device.
+    async _showHistory() {
+        const history = await this._roomKeys.history(this._roomId);
+        const list = document.querySelector(`[id="${Modals.ROOM.HISTORY}"] [data-field="history"]`);
+        if (!list) return;
+
+        // Aliases come from other members: always escaped
+        const name = (p, start) => !p ? "someone" : p.own ? (start ? "You" : "you")
+            : `<span class="alias-color" style="--alias-hue: ${idHue(p.memberId)}">${escapeHTML(p.alias)}</span>`;
+        const names = people => people.map(p => name(p, false)).join(", ");
+
+        const what = h => {
+            const by = h.signer ? ` — by ${name(h.signer, false)}` : "";
+            switch (h.reason) {
+                case "create": return ["add-circle-outline", `Room created${by}`];
+                case "add":    return ["person-add-outline", h.subject?.own ? `You joined — added by ${name(h.signer, false)}` : `${name(h.signer, true)} added ${name(h.subject, false)}`];
+                case "leave":  return ["exit-outline", `${name(h.subject, true)} left${by}`];
+                case "remove": return ["person-remove-outline", `${name(h.signer, true)} removed ${name(h.subject, false)}`];
+                case "renew":  return ["refresh-outline", `Key renewed${by}`];
+            }
+            // Epochs from before the history was kept: what changed in the member list
+            const changes = [
+                h.added.length ? `added ${names(h.added)}` : "",
+                h.removed.length ? `removed ${names(h.removed)}` : "",
+            ].filter(Boolean).join(", ");
+            return ["key-outline", changes ? `Members changed: ${changes}` : "Key changed"];
+        };
+
+        // First 4 bytes of a hash as hex; the first epoch points to nothing (all zero)
+        const short = hash => {
+            if (!hash) return "—";
+            const bytes = Uint8Array.from(atob(hash), c => c.charCodeAt(0));
+            if (bytes.every(b => b === 0)) return "start";
+            return Array.from(bytes.subarray(0, 4), b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+        };
+        list.innerHTML = history.map((h, i) => {
+            const [icon, text] = what(h);
+            const tags = [
+                h.current ? '<span class="badge badge-primary">current</span>' : "",
+                i === history.length - 1 && !h.current && h.reason !== "create" ? '<span class="badge badge-secondary">first on this device</span>' : "",
+            ].join(" ");
+            return `
+            <li class="${h.current ? "current" : ""}">
+                <details>
+                    <summary>
+                        <div class="key-history-head">
+                            <strong>Epoch ${h.epoch}</strong> ${tags}
+                            <span class="key-history-time">${h.created ? escapeHTML(new Date(h.created).toLocaleString()) : ""}</span>
+                        </div>
+                        <div class="key-history-text"><ion-icon name="${icon}"></ion-icon> ${text}</div>
+                    </summary>
+                    <div class="key-history-details small">
+                        <div class="text-muted">Members (${h.members.length})</div>
+                        <ul>${h.members.map(m => `<li>${name(m, true)} <code>${m.fingerprint}</code></li>`).join("")}</ul>
+                        <div class="text-muted">Chain <code>${short(h.prevHash)}</code> → <code>${short(h.headerHash)}</code></div>
+                        <div class="text-muted">${h.messages} message${h.messages === 1 ? "" : "s"} of this epoch on this device</div>
+                    </div>
+                </details>
+            </li>`;
+        }).join("") || `<li class="text-muted">No key changes known yet</li>`;
+
+        this._events.emit(Events.MODAL.OPEN, Modals.ROOM.HISTORY);
+    }
+
+    // First click arms the button, the second one removes the member
+    async _removeMember(memberId) {
+        const btn = document.querySelector(`[data-action="room:remove_member"][data-body="${memberId}"]`);
+        if (btn && !btn.dataset.armed) {
+            btn.dataset.armed = "1";
+            btn.textContent = "Really remove?";
+            return;
+        }
+
+        await this._roomKeys.removeMember(this._roomId, memberId);
+        this._events.emit(Events.MODAL.CLOSE, Modals.ROOM.MEMBERS);
+        this._events.emit(Notifications.INFO, {header: "Members", msg: "The member is removed with the next key change."});
+    }
+
     // Shares the image of the image modal (CHAT.SHARE_IMAGE); downloads it where the browser
     // cannot share files (desktop).
     _shareImage() {
@@ -851,7 +1156,7 @@ export class ViewRoom {
 
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
             navigator.share({ files: [file] }).catch(err => {
-                if (err.name !== 'AbortError') console.error('Share failed:', err);
+                if (err.name !== 'AbortError') log.error("share failed:", err);
             });
             return;
         }
@@ -861,6 +1166,13 @@ export class ViewRoom {
         a.download = file.name;
         a.click();
     }
+}
+
+// Aliases come from other members — never insert them as HTML
+function escapeHTML(str) {
+    const el = document.createElement("div");
+    el.textContent = str ?? "";
+    return el.innerHTML;
 }
 
 // File name with the extension of the image type, e.g. "chatbit-image.png"

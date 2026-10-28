@@ -39,3 +39,6 @@ chatbit_db.kv/
 files/
 vapid.json
 artifacts/
+
+# Build tool of the crypto bundle (npm ci --ignore-scripts)
+tools/crypto-bundle/node_modules/

@@ -46,6 +46,12 @@ func (c *WsClient) handleTransferStart(hdr *domain.File) bool {
 		return false
 	}
 
+	// Only members of the current epoch upload (the file is encrypted with its key)
+	if !room.IsMember(c.UID) {
+		c.sendNACK(hdr.ID, 0, "member")
+		return false
+	}
+
 	// The room decides whether the file is kept on the server
 	hdr.Store = room.StoreMessages(hdr.Store)
 
@@ -152,7 +158,7 @@ func (c *WsClient) handleTransferDone(done *domain.File) bool {
 
 	// The image message itself was already stored via the normal "message" path. The message
 	// embedded in the file header must not be stored: it has the same key but no timestamp,
-	// type or alias, so it would overwrite the real message and offline peers would never get it.
+	// type or sender, so it would overwrite the real message and offline peers would never get it.
 	msgB, err := json.Marshal(t.Message)
 	if err != nil {
 		slog.Error("not possible to unmarshal ws message ", slog.String("error", err.Error()))
@@ -267,6 +273,12 @@ func (c *WsClient) sendFileTransferStart(file *domain.File) error {
 	if err != nil {
 		slog.Error("not possible to get file header from database", slog.String("error", err.Error()))
 		return err
+	}
+
+	// Only members of the current epoch of the file's room may download it
+	room, err := c.app.DB.Room.Get(hdr.RoomID[:])
+	if err != nil || !room.IsMember(c.UID) {
+		return fmt.Errorf("file %s requested by a peer that is not a member", hdr.ID)
 	}
 
 	// Headers stored before the upload validation existed

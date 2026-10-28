@@ -1,6 +1,9 @@
 import {Events} from "./event.js";
 import {Message} from "../domain/message.js";
 import {File} from "../domain/file.js";
+import {logger} from "./log.js";
+
+const log = logger("ws");
 
 const CHUNK_SIZE = 64 * 1024; // 64KB
 
@@ -18,7 +21,8 @@ const FILE_UPLOAD_ATTEMPTS = 3;
 // automatically: on every close it reconnects with exponential backoff, and
 // it reconnects immediately when the browser comes back online or the app
 // becomes visible again. After every (re)connect all rooms are joined again
-// and messages missed while offline are fetched via lastConnectionTime.
+// and messages missed while offline are fetched per room from its cursor (Room.syncedUntil, the
+// server time of the newest message received — never the client clock).
 //
 // Events emitted:
 //   Events.WS.CONNECTED                — socket opened and rooms joined (every reconnect)
@@ -26,13 +30,16 @@ const FILE_UPLOAD_ATTEMPTS = 3;
 //   Events.WS.RECEIVED_MESSAGE (Message) — message received from the server
 //   Events.WS.RECEIVED_FILE    (File)    — assembled binary transfer
 //   Events.WS.ROOM_CLEANED     ({id, timestamp}) — another member cleaned the room
-//   Events.WS.JOIN_REJECTED    ({id, reason})    — no valid join code for the room
+//   Events.WS.JOINING ([id]), ROOM_SYNCED ({id, until}) — cursor of the missed messages (database.js)
+//   Events.WS.JOIN_REJECTED    ({id, reason, rotations?}) — no valid join code / catch up
+//   Events.WS.ROTATION, ROTATE_REJECTED, REJOIN_REQUIRED, JOIN_REQUEST, KEY_UPDATE,
+//   MESSAGE_REJECTED                             — room keys with epochs (room_keys.js)
 export class WebSocketAdapter {
     constructor(events, db, keyStore) {
         this.conn = null;
         this._events = events;
         this._db = db;
-        this._keyStore = keyStore; // member codes for joining the rooms
+        this._keyStore = keyStore; // join entries (epoch + member code) of the rooms
 
         // Connection state
         this._profile = null;
@@ -59,7 +66,6 @@ export class WebSocketAdapter {
     handler = (profile) => {
         this._events.off(Events.STATE.UNLOCK, this.handler);
 
-        console.log("WS connection starting...");
         this._profile = profile;
         this._watchNetwork();
         this._connect();
@@ -76,7 +82,12 @@ export class WebSocketAdapter {
             this.sendMessage(msg);
         });
 
-        // body: {id, notification}
+        this._events.on(Events.WS.SEND_ROTATE, (data) => this._sendText("rotate", data));
+        this._events.on(Events.WS.SEND_JOIN_REQUEST, (data) => this._sendText("join_request", data));
+        this._events.on(Events.WS.SEND_KEY_UPDATE, (data) => this._sendText("key_update", data));
+        this._events.on(Events.WS.SEND_ANSWER_REQUEST, (data) => this._sendText("answer_request", data));
+
+        // body: {id, epoch, memberCode?, notification, ttl?, store?}
         this._events.on(Events.WS.JOIN_ROOM, async (room) => {
             this.joinRooms({
                 rooms: [room],
@@ -119,7 +130,7 @@ export class WebSocketAdapter {
 
     _connect() {
         if (!window["WebSocket"]) {
-            console.error("WebSockets not supported");
+            log.error("WebSockets are not supported");
             return;
         }
 
@@ -149,28 +160,28 @@ export class WebSocketAdapter {
                 try {
                     this._handleIncomingMessage(JSON.parse(text));
                 } catch (err) {
-                    console.error("Failed to parse WS message:", text, err);
+                    log.error("invalid frame from the server:", err.message);
                 }
             }
         };
 
         // The browser always fires "close" after "error", so reconnecting is handled there.
         conn.onerror = (err) => {
-            console.warn("WS connection error:", err);
+            log.warn("connection error");
         };
 
         conn.onclose = (evt) => {
             // Ignore close events of an old socket that was already replaced
             if (this.conn !== conn) return;
 
-            console.log("WS connection closed", evt.code, evt.reason);
+            log.info("connection closed", evt.code, evt.reason);
             this._failTransfers();
             this._scheduleReconnect();
         };
     }
 
     async _onOpen() {
-        console.log("WS connection connected");
+        log.info("connected");
         this._reconnectDelay = RECONNECT_DELAY_MIN;
 
         // Must be the first frame of every connection, before anything from the outbox
@@ -181,7 +192,7 @@ export class WebSocketAdapter {
         try {
             await this._joinAllRooms();
         } catch (err) {
-            console.error("Failed to join rooms:", err);
+            log.error("joining the rooms failed:", err);
         }
 
         this._flushOutbox();
@@ -195,22 +206,21 @@ export class WebSocketAdapter {
         }
     }
 
-    // Joins all locally stored rooms and requests every message newer than the last one we have.
+    // Joins all locally stored rooms (members with a code of their newest epoch, waiting new
+    // members without). Every entry carries `since`: the missed messages come per room.
     async _joinAllRooms() {
         const rooms = await this._db.getRooms();
-        const lastTimeStamp = await this._db.getLatestTimestamp();
 
         const joins = [];
         for (const r of rooms) {
-            joins.push({
-                id: r.id, notification: r.pushNotifications, ttl: r.ttl, store: r.store,
-                memberCode: await this._keyStore.memberCode(r.id, this._profile.clientId),
-            });
+            const entry = await this._keyStore.joinEntry(r, this._profile.clientId);
+            if (entry) joins.push(entry);
         }
 
+        log.debug(`joining ${joins.length} rooms`);
         this.joinRooms({
             rooms: joins,
-            lastConnectionTime: lastTimeStamp,
+            lastConnectionTime: 0, // only for rooms without `since` (a new room)
         });
     }
 
@@ -220,7 +230,7 @@ export class WebSocketAdapter {
         const delay = this._reconnectDelay;
         this._reconnectDelay = Math.min(this._reconnectDelay * 2, RECONNECT_DELAY_MAX);
 
-        console.log(`WS reconnecting in ${delay}ms`);
+        log.info(`reconnecting in ${delay} ms`);
         this._reconnectTimer = setTimeout(() => {
             this._reconnectTimer = null;
             this._connect();
@@ -274,6 +284,7 @@ export class WebSocketAdapter {
     }
 
     joinRooms(msg) {
+        this._events.emit(Events.WS.JOINING, msg.rooms.map(r => r.id));
         this._sendText("join_rooms", msg);
     }
 
@@ -313,8 +324,29 @@ export class WebSocketAdapter {
             case "room_info":
                 this._events.emit(Events.WS.ROOM_INFO, msg.data);
                 break;
+            case "room_synced":
+                this._events.emit(Events.WS.ROOM_SYNCED, msg.data);
+                break;
             case "join_rejected":
                 this._events.emit(Events.WS.JOIN_REJECTED, msg.data);
+                break;
+            case "rotation":
+                this._events.emit(Events.WS.ROTATION, msg.data);
+                break;
+            case "rotate_rejected":
+                this._events.emit(Events.WS.ROTATE_REJECTED, msg.data);
+                break;
+            case "rejoin_required":
+                this._events.emit(Events.WS.REJOIN_REQUIRED, msg.data);
+                break;
+            case "join_request":
+                this._events.emit(Events.WS.JOIN_REQUEST, msg.data);
+                break;
+            case "key_update":
+                this._events.emit(Events.WS.KEY_UPDATE, msg.data);
+                break;
+            case "message_rejected":
+                this._events.emit(Events.WS.MESSAGE_REJECTED, msg.data);
                 break;
             case "clean_room":
                 this._events.emit(Events.WS.ROOM_CLEANED, msg.data);
@@ -324,7 +356,7 @@ export class WebSocketAdapter {
                 break;
             case "transfer_nack":
                 // The server rejected the upload (e.g. too large) — stop waiting for an ACK
-                console.warn("transfer rejected:", msg.data.id, msg.data.reason);
+                log.warn("upload rejected by the server:", msg.data.reason);
                 this.rejectAck(msg.data.id, msg.data.reason);
                 break;
             case "transfer_start":
@@ -337,7 +369,7 @@ export class WebSocketAdapter {
                 this._assembleTransfer(msg.data.id);
                 break;
             default:
-                console.warn("Unknown WS message type:", msg.type);
+                log.warn("unknown frame type:", msg.type);
         }
     }
 
@@ -346,7 +378,7 @@ export class WebSocketAdapter {
     // -------------------------------------------------------------------------
 
     _handleTransferStart(id, roomId, mimeType, timestamp, chunksTotal, chunkSize) {
-        console.log("transfer start", id, chunksTotal, "chunks");
+        log.debug("download started", id, chunksTotal, "chunks");
         this._incomingTransfers.set(id, {
             roomId, mimeType, timestamp,
             chunks: new Array(chunksTotal).fill(null),
@@ -379,7 +411,7 @@ export class WebSocketAdapter {
     _assembleTransfer(fileId) {
         const t = this._incomingTransfers.get(fileId);
         if (!t) {
-            console.error("unknown transfer:", fileId);
+            log.warn("end of an unknown transfer", fileId);
             return;
         }
 
@@ -421,11 +453,11 @@ export class WebSocketAdapter {
                 await this.sendFile(msg);
                 return;
             } catch (err) {
-                console.warn(`File upload ${msg.id} failed (attempt ${attempt}/${FILE_UPLOAD_ATTEMPTS}):`, err.message);
+                log.warn(`upload failed (attempt ${attempt}/${FILE_UPLOAD_ATTEMPTS}):`, err.message);
                 if (err.message.startsWith("rejected by server")) break; // trying again won't help
             }
         }
-        console.error(`File upload ${msg.id} failed, giving up`);
+        log.error("upload failed, giving up");
     }
 
     // Sends all chunks; each chunk is only sent after the server acknowledged the previous one.

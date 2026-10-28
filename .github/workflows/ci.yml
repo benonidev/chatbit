@@ -50,7 +50,7 @@ jobs:
         run: go build -trimpath -o artifacts/chatbit .
 
   web:
-    name: PWA – syntax check
+    name: PWA – syntax check, tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,6 +65,18 @@ jobs:
         run: |
           find dist -name '*.js' -not -path 'dist/assets/js/lib/*' -not -path 'dist/assets/js/plugins/*' -print0 \
             | xargs -0 -n1 node --check
+
+      # Room key cryptography and the protocol with several clients (docs/room-keys.md)
+      - name: node --test
+        run: node --test "tests/js/*.test.mjs"
+
+      # The checked in crypto bundle must be exactly what the pinned versions build
+      - name: crypto bundle is reproducible
+        working-directory: tools/crypto-bundle
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          git diff --exit-code ../../dist/assets/js/lib/crypto-bundle.js
 
   docker:
     name: Docker image

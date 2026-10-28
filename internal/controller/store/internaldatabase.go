@@ -15,32 +15,39 @@ type AdapterInternal[T ObjectInternal] struct {
 }
 
 func NewAdapterInternal[T ObjectInternal](db Database[T]) *AdapterInternal[T] {
-	var obj T
-
-	var prefix []byte
-
-	// Every type needs its own prefix, otherwise its keys mix with the keys of other types
-	switch any(obj).(type) {
-	case domain.Message:
-		prefix = convertUint16ToByte(PrefixMessage)
-	case *domain.Room:
-		prefix = convertUint16ToByte(PrefixRoom)
-	case *domain.File:
-		prefix = convertUint16ToByte(PrefixFile)
-	case domain.Push:
-		prefix = convertUint16ToByte(PrefixPush)
-	case domain.Peer:
-		prefix = convertUint16ToByte(PrefixPeer)
-	case domain.UsedJoinCode:
-		prefix = convertUint16ToByte(PrefixUsedCode)
-	default:
-		panic(fmt.Sprintf("store: no key prefix for %T", obj))
-	}
-
 	return &AdapterInternal[T]{
 		db:     db,
-		prefix: prefix,
+		prefix: prefixOf[T](),
 		mutex:  sync.RWMutex{},
+	}
+}
+
+// prefixOf returns the key prefix of a type. Every type needs its own prefix, otherwise its keys
+// mix with the keys of other types.
+func prefixOf[T any]() []byte {
+	var obj T
+
+	switch any(obj).(type) {
+	case domain.Message:
+		return convertUint16ToByte(PrefixMessage)
+	case *domain.Room:
+		return convertUint16ToByte(PrefixRoom)
+	case *domain.File:
+		return convertUint16ToByte(PrefixFile)
+	case domain.Push:
+		return convertUint16ToByte(PrefixPush)
+	case domain.Peer:
+		return convertUint16ToByte(PrefixPeer)
+	case domain.UsedJoinCode:
+		return convertUint16ToByte(PrefixUsedCode)
+	case domain.Rotation:
+		return convertUint16ToByte(PrefixRotation)
+	case domain.JoinRequest:
+		return convertUint16ToByte(PrefixJoinRequest)
+	case domain.KeyUpdate:
+		return convertUint16ToByte(PrefixKeyUpdate)
+	default:
+		panic(fmt.Sprintf("store: no key prefix for %T", obj))
 	}
 }
 

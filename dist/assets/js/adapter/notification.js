@@ -30,9 +30,6 @@ export class Notification {
 
         if (!time) time = 3000;
 
-        let subtitleHtml;
-        if (subtitle) subtitleHtml = `<h3 class="subtitle">${subtitle}</h3>`
-
         // Close and remove previous notifications
         const existingBoxes = container.querySelectorAll(".notification-box");
         existingBoxes.forEach((el) => {
@@ -45,7 +42,7 @@ export class Notification {
             <div class="notification-box">
                 <div class="notification-dialog ios-style bg-${type}">
                     <div class="notification-header">
-                        <strong>${title || ""}</strong>
+                        <strong data-field="title"></strong>
                         <div class="right">
                             <button type="button" class="close-button" aria-label="Close">
                                 <ion-icon name="close-circle"></ion-icon>
@@ -54,8 +51,8 @@ export class Notification {
                     </div>
                     <div class="notification-content">
                         <div class="in">
-                            ${subtitleHtml || ""}
-                            <div class="text">${msg || ""}</div>
+                            <h3 class="subtitle" data-field="subtitle"></h3>
+                            <div class="text" data-field="msg"></div>
                         </div>
                     </div>
                 </div>
@@ -63,6 +60,13 @@ export class Notification {
         `.trim();
 
         const notificationBox = template.content.firstElementChild;
+
+        // textContent: the texts can contain room names and aliases of other users
+        notificationBox.querySelector('[data-field="title"]').textContent = title || "";
+        notificationBox.querySelector('[data-field="msg"]').textContent = msg || "";
+        const subtitleEl = notificationBox.querySelector('[data-field="subtitle"]');
+        if (subtitle) subtitleEl.textContent = subtitle;
+        else subtitleEl.remove();
         container.appendChild(notificationBox);
 
         let autoCloseTimeout = null;

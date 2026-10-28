@@ -13,8 +13,9 @@ import (
 )
 
 // Join codes prove that a client may join a room. Both are derived from the join secret of the
-// room (HMAC-SHA256, first JoinCodeBytes bytes, base64url), a time window and a random nonce,
-// which makes every code different. Every code is valid once (see UsedJoinCode):
+// current epoch (HMAC-SHA256, first JoinCodeBytes bytes, base64url), a time window and a random
+// nonce, which makes every code different. Every code is valid once (see UsedJoinCode). The join
+// secret is set by every rotation (rotation.go), so a removed member can not join anymore:
 //
 //   - invite code: "<nonce>.<HMAC(secret, "invite:<window>:<nonce>")>" — in the invite QR code
 //   - member code: "<nonce>.<HMAC(secret, "member:<window>:<clientUid>:<nonce>")>" — a new one
@@ -60,34 +61,30 @@ func joinCode(secret []byte, msg string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)[:JoinCodeBytes])
 }
 
-// EnsureJoinSecret creates the join secret if the room has none yet and returns it.
-func (r *Room) EnsureJoinSecret() []byte {
-	if len(r.JoinSecret) == 0 {
-		r.JoinSecret = NewJoinSecret()
-	}
-
-	return r.JoinSecret
-}
-
-// ValidMemberCode reports whether code is a member code of clientUID in a window around now.
-// Whether it was used before is checked by the caller.
+// ValidMemberCode reports whether code is a member code of clientUID for the join secret of the
+// current epoch, in a window around now. Whether it was used before is checked by the caller.
 func (r *Room) ValidMemberCode(code string, clientUID uuid.UUID, now time.Time) bool {
-	return r.validCode(code, now, func(window int64, nonce string) string {
-		return MemberCode(r.JoinSecret, window, clientUID, nonce)
-	})
+	return ValidMemberCode(r.JoinSecret, code, clientUID, now)
 }
 
-// ValidInviteCode reports whether code is an invite code of a window around now. Whether it
-// was used before is checked by the caller.
+// ValidInviteCode reports whether code is an invite code of the current epoch in a window
+// around now. Whether it was used before is checked by the caller.
 func (r *Room) ValidInviteCode(code string, now time.Time) bool {
-	return r.validCode(code, now, func(window int64, nonce string) string {
+	return validCode(r.JoinSecret, code, now, func(window int64, nonce string) string {
 		return InviteCode(r.JoinSecret, window, nonce)
 	})
 }
 
-func (r *Room) validCode(code string, now time.Time, derive func(window int64, nonce string) string) bool {
+// ValidMemberCode checks a member code against any join secret (e.g. of an older epoch)
+func ValidMemberCode(secret []byte, code string, clientUID uuid.UUID, now time.Time) bool {
+	return validCode(secret, code, now, func(window int64, nonce string) string {
+		return MemberCode(secret, window, clientUID, nonce)
+	})
+}
+
+func validCode(secret []byte, code string, now time.Time, derive func(window int64, nonce string) string) bool {
 	// Without a secret every code could be derived — such a room can not be joined
-	if len(r.JoinSecret) == 0 {
+	if len(secret) == 0 {
 		return false
 	}
 

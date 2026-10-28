@@ -1,6 +1,7 @@
 // Join codes prove to the server that a client may join a room — same derivation as the server
-// (internal/domain/joincode.go): HMAC-SHA256 with the join secret of the room, first 9 bytes,
-// base64url, over a 5 minute time window and a random nonce. Every code is valid once.
+// (internal/domain/joincode.go): HMAC-SHA256 with the join secret J of the current epoch (it comes
+// in the envelope of every rotation, see docs/room-keys.md), first 9 bytes, base64url, over a
+// 5 minute time window and a random nonce. Every code is valid once.
 //
 //   invite code: "<nonce>.<HMAC(secret, "invite:<window>:<nonce>")>" — in the invite QR code
 //   member code: "<nonce>.<HMAC(secret, "member:<window>:<clientUid>:<nonce>")>" — a new one
@@ -21,7 +22,7 @@ export function joinWindowEnd(window) {
     return (window + 2) * JOIN_CODE_PERIOD * 1000;
 }
 
-// The join secret comes base64 encoded with room_info
+// The join secret J is base64 encoded
 export async function importJoinSecret(secretBase64) {
     const raw = Uint8Array.from(atob(secretBase64), c => c.charCodeAt(0));
     return crypto.subtle.importKey("raw", raw, {name: "HMAC", hash: "SHA-256"}, false, ["sign"]);

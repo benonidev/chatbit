@@ -11,6 +11,7 @@
     <meta name="vapid-public-key" content="{{.VAPIDPublicKey}}">
     <meta name="max-file-size" content="{{.MaxFileSize}}">
     <meta name="app-version" content="{{.Version}} · {{printf "%.7s" .Commit}} · {{.BuildDate}}">
+    <meta name="app-hash" content="{{.AssetHash}}">
     <title>ChatBit SecureChat</title>
     <meta name="description" content="ChatBit SecureChat">
     <meta name="keywords" content="bootstrap 5, mobile template, cordova, phonegap, mobile, html" />
@@ -54,7 +55,6 @@
     <script src="assets/js/plugins/splide/splide.min.js"></script>
     <!-- Base Js File -->
     <script type="module" src="assets/js/index.js"></script>
-    <script src="assets/js/push.js?t=8"></script>
     <script src="assets/js/base.js?t=8"></script>
 </body>
 

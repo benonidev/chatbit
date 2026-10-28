@@ -2,7 +2,7 @@
 @import url("inc/bootstrap/bootstrap.min.css");
 @import url("inc/splide/splide.min.css");
 @import url("inc/bootstrap/bootstrap-icons.min.css");
-@import url("https://fonts.googleapis.com/css?family=Inter:400,500,700&display=swap");
+@import url("inc/inter/inter.css");
 html {
   overflow-x: hidden;
 }
@@ -81,23 +81,63 @@ button:hover, button:active, button:focus {
   top: calc(56px + env(safe-area-inset-top));
   left: 0;
   right: 0;
-  bottom: 175px;
+  /* measured from the top like the footer below (no bottom: on the iPhone, see .homeFooter) */
+  height: calc(100svh - 56px - env(safe-area-inset-top) - var(--home-footer-height));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-.homeFooter {
+/* Home footer: logo, name and a GitHub link in a slim bar (.appFooter comes later in this file).
+   On the iPhone the content sits just above the home indicator: only the part of the safe area
+   the indicator needs (inset - 20px) is added, not the whole 34px.
+   Placed with top like .chatFooter: an installed web app on iOS (black-translucent status bar)
+   puts elements with bottom: 0 too high. */
+:root {
+  --home-footer-height: calc(56px + max(0px, env(safe-area-inset-bottom) - 20px));
+}
+
+.appFooter.homeFooter {
   position: fixed;
-  bottom: 0;
-  #left: 0;
-  #right: 0;
-  height: 175px;
-  #z-index: 10;
-  #width: 100%;
-  #align-items: center;
-  #justify-content: space-between;
-  #padding-left: 14px;
-  #padding-right: 14px;
+  top: calc(100svh - var(--home-footer-height));
+  bottom: auto;
+  height: var(--home-footer-height);
+  padding: 6px 16px calc(6px + max(0px, env(safe-area-inset-bottom) - 20px)) 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.home-footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.home-footer-logo {
+  width: 22px;
+  height: 22px;
+}
+
+.home-footer-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  opacity: .65;
+}
+
+.home-footer-meta a {
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.home-footer-meta ion-icon {
+  font-size: 14px;
 }
 
 .text-line-break{
@@ -4939,15 +4979,29 @@ textarea,
   padding: 0 0 0 10px;
 }
 
+/* signed mark, time, remaining time and status in one centered row — on the left under messages
+   of others, on the right under own ones */
 .message-item .footer {
   font-size: 12px;
-  padding: 0 10px;
-  text-align: right;
-  line-height: 1em;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  line-height: 1;
   margin-top: 5px;
   color: #141515;
   opacity: .4;
   height: 14px;
+}
+
+.message-item.user .footer {
+  justify-content: flex-end;
+}
+
+.message-item .footer ion-icon {
+  flex-shrink: 0;
+  font-size: 14px;
 }
 
 .message-item .avatar {
@@ -9631,6 +9685,14 @@ body.dark-mode-active.rtl-mode .notification-dialog.android-style .notification-
   margin-left: 8px;
 }
 
+/* Security chip in the room header: lock, epoch and members — opens the security page */
+.appHeader .pageTitle .room-ttl .room-security {
+  color: inherit;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
 /* Share dialog: an expired invite code covers the QR code */
 .qr-wrapper {
   position: relative;
@@ -9656,13 +9718,11 @@ body.dark-mode-active.rtl-mode .notification-dialog.android-style .notification-
 
 /* Remaining time in the message footer */
 .message-item .footer .msg-ttl {
-  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   opacity: 0.7;
   white-space: nowrap;
-}
-
-.message-item .footer .msg-ttl ion-icon {
-  vertical-align: -2px;
 }
 
 /* Unread messages in the room list of the home page */
@@ -9699,11 +9759,13 @@ body.dark-mode-active.rtl-mode .notification-dialog.android-style .notification-
 /* Alias color per user (hue from the alias id, see aliasHue in view_room.js).
    OKLCH keeps the perceived lightness equal for every hue: dark text on the light theme,
    light text on the dark theme, both with a contrast of at least 4.5:1. HSL is the fallback. */
+.alias-color,
 .message-item .title.alias-color {
   color: hsl(var(--alias-hue) 70% 32%);
   color: oklch(0.5 0.14 var(--alias-hue));
 }
 
+body.dark-mode-active .alias-color,
 body.dark-mode-active .message-item .title.alias-color {
   color: hsl(var(--alias-hue) 70% 72%);
   color: oklch(0.8 0.12 var(--alias-hue));
@@ -9853,4 +9915,419 @@ body.dark-mode-active .logo-for-light {
     margin-left: auto;
     margin-right: auto;
   }
+}
+
+/* Room keys with epochs (docs/room-keys.md) */
+/* Fixed right under the header (like .chatContent) — the chat is moved down by its height in
+   ViewRoom._renderRoomState */
+.room-state {
+  position: fixed;
+  top: calc(56px + env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  z-index: 998;
+  padding: 10px 16px;
+  font-size: 13px;
+  text-align: center;
+  background: #fff3cd;
+  color: #664d03;
+}
+
+body.dark-mode-active .room-state {
+  background: #3d3214;
+  color: #ffe69c;
+}
+
+.message-divider.system-message {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+
+/* Reply: the bar above the chat footer while answering, and the quote in a message */
+.reply-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: #F4F5F5;
+  border-top: 1px solid #E1E1E1;
+  font-size: 13px;
+}
+
+.reply-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border-left: 3px solid var(--bs-primary, #1E74FD);
+  padding-left: 8px;
+}
+
+.reply-bar-text strong {
+  margin-right: 6px;
+}
+
+.msg-reply {
+  display: block;
+  max-width: 100%;
+  margin: 4px 0 -2px;
+  padding: 4px 10px;
+  border-left: 3px solid hsl(var(--alias-hue, 210), 60%, 50%);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 12px;
+  line-height: 1.3em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.msg-reply strong {
+  display: block;
+}
+
+.msg-reply.missing {
+  font-style: italic;
+  cursor: default;
+}
+
+/* the signature of the message is valid (every shown message — invalid ones are dropped) */
+.message-item .footer .msg-signed {
+  color: #34C759;
+}
+
+/* bubble, quote and footer stacked and flush with the left edge (others) or the right edge (own) */
+.message-item .content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+.message-item.user .content {
+  align-items: flex-end;
+}
+
+.message-item .content.msg-flash .bubble {
+  outline: 2px solid hsl(var(--alias-hue, 210), 60%, 50%);
+  transition: outline-color 0.3s;
+}
+
+.message-info code {
+  font-size: 15px;
+  letter-spacing: 1px;
+}
+
+body.dark-mode-active .reply-bar {
+  background: #1B283B;
+  border-top-color: #0F1C2F;
+}
+
+body.dark-mode-active .msg-reply {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Key history: timeline of the epochs (ViewRoom._showHistory) */
+.key-history {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 24px 16px;
+}
+
+.key-history > li {
+  position: relative;
+  padding: 0 0 16px 22px;
+  border-left: 2px solid #E1E1E1;
+}
+
+.key-history > li:last-child {
+  border-left-color: transparent;
+}
+
+.key-history > li::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #A1A1A2;
+}
+
+.key-history > li.current::before {
+  background: var(--bs-primary, #1E74FD);
+}
+
+.key-history summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.key-history summary::-webkit-details-marker {
+  display: none;
+}
+
+.key-history-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  line-height: 1.2;
+}
+
+.key-history-time {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: .6;
+}
+
+.key-history-text {
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.key-history-text ion-icon {
+  vertical-align: -2px;
+}
+
+.key-history-details {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.key-history-details ul {
+  margin: 2px 0 6px 0;
+  padding-left: 16px;
+}
+
+body.dark-mode-active .key-history > li {
+  border-left-color: #1B283B;
+}
+
+body.dark-mode-active .key-history-details {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Security page (ViewRoom._showSecurity) */
+.security-status {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(52, 199, 89, 0.12);
+  line-height: 1.5;
+}
+
+.security-status .security-ok {
+  font-weight: 600;
+  color: #34C759;
+}
+
+.security-status .security-wait {
+  font-weight: 600;
+  color: #FF9500;
+}
+
+.security-page h3 {
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+.key-diagram {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  gap: 6px;
+  margin: 12px 0;
+  text-align: center;
+}
+
+.key-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.key-box ion-icon {
+  font-size: 22px;
+}
+
+.key-box span {
+  font-size: 11px;
+  opacity: .75;
+}
+
+.key-base { background: rgba(30, 116, 253, 0.12); }
+.key-epoch { background: rgba(255, 149, 0, 0.14); }
+.key-room { grid-column: 1 / -1; background: rgba(52, 199, 89, 0.14); }
+
+.key-plus,
+.key-arrow {
+  align-self: center;
+  font-size: 20px;
+  font-weight: 600;
+  opacity: .6;
+}
+
+.key-arrow {
+  grid-column: 1 / -1;
+}
+
+.security-list {
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.security-list li {
+  margin-bottom: 6px;
+}
+
+.security-list.warn li::marker {
+  color: #FF9500;
+}
+
+.server-sees {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.server-sees ul {
+  padding-left: 16px;
+  margin: 4px 0 0 0;
+}
+
+/* Update dialog: installed and available version */
+.update-info {
+  text-align: left;
+}
+
+.update-version {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.update-version code {
+  font-size: 12px;
+}
+
+/* Security page: how an epoch key is sent (steps) and how a message is sent */
+.key-flow {
+  list-style: none;
+  margin: 8px 0 0 0;
+  padding: 0;
+}
+
+.key-flow li {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding-bottom: 14px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* line from one step to the next */
+.key-flow li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 17px;
+  top: 36px;
+  bottom: 0;
+  width: 2px;
+  background: rgba(128, 128, 128, 0.3);
+}
+
+.key-flow strong {
+  display: block;
+}
+
+.key-flow span {
+  opacity: .8;
+}
+
+.flow-icon {
+  flex: 0 0 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.flow-alice  { background: rgba(255, 149, 0, 0.18); color: #FF9500; }
+.flow-server { background: rgba(142, 142, 147, 0.2); color: #8E8E93; }
+.flow-member { background: rgba(52, 199, 89, 0.18); color: #34C759; }
+
+.envelopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.envelopes .envelope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: 1;
+  background: rgba(30, 116, 253, 0.12);
+}
+
+.envelopes .envelope.missing {
+  background: rgba(255, 59, 48, 0.12);
+  color: #FF3B30;
+  text-decoration: line-through;
+}
+
+.msg-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 12px 0;
+  font-size: 12px;
+}
+
+.msg-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.14);
+}
+
+.msg-step.flow-server-text {
+  color: #8E8E93;
+}
+
+.msg-arrow {
+  opacity: .5;
+}
+
+/* the dark theme sets bottom: 0 on every .appFooter — the home footer is placed with top */
+body.dark-mode-active .appFooter.homeFooter {
+  bottom: auto;
 }

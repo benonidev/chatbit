@@ -16,6 +16,7 @@ const (
 	WsTypeJoinRoom            WsMessageType = "join_rooms"
 	WsTypeHello               WsMessageType = "hello" // first frame of a connection: {clientUid}
 	WsTypeRoomInfo            WsMessageType = "room_info"
+	WsTypeRoomSynced          WsMessageType = "room_synced"   // all missed messages of a join are sent
 	WsTypeJoinRejected        WsMessageType = "join_rejected" // the join code was missing, wrong, expired or used
 	WsTypeCreateRoom          WsMessageType = "create_room"
 	WsTypeSubscribePush       WsMessageType = "sub_push"
@@ -24,6 +25,16 @@ const (
 	WsTypeFileTransferACK     WsMessageType = "transfer_ack"
 	WsTypeFileTransferNACK    WsMessageType = "transfer_nack"
 	WsTypeFileTransferRequest WsMessageType = "transfer_request"
+
+	// Room keys with epochs (rotation.go)
+	WsTypeRotate          WsMessageType = "rotate"           // client → server: next epoch
+	WsTypeRotation        WsMessageType = "rotation"         // server → clients: accepted rotation
+	WsTypeRotateRejected  WsMessageType = "rotate_rejected"  // another rotation was first
+	WsTypeRejoinRequired  WsMessageType = "rejoin_required"  // after a rotation: join with the new join secret
+	WsTypeJoinRequest     WsMessageType = "join_request"     // new member asks to join (encrypted)
+	WsTypeAnswerRequest   WsMessageType = "answer_request"   // a member approved / declined a join request
+	WsTypeKeyUpdate       WsMessageType = "key_update"       // new exchange key of a member (encrypted)
+	WsTypeMessageRejected WsMessageType = "message_rejected" // message not accepted (e.g. room rotated meanwhile)
 )
 
 // Hello is the first frame of a WebSocket connection. The client id is sent here instead of in

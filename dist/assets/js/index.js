@@ -8,8 +8,6 @@ const pageMain = "home";
 const app= new App();
 
 window.onload = async (event) => {
-    console.log("Page loaded");
-
     window.app = app;
 
     await app.init();

@@ -36,6 +36,23 @@ tasks:
           -o {{ .RESULTS}}/{{.PROJECT_NAME }} \
           main.go
 
+  test:js:
+    desc: Tests of the room key cryptography and protocol (Node, no dependencies)
+    cmds:
+      - node --test "tests/js/*.test.mjs"
+
+  hash:
+    desc: Hash of the web app in dist/ — the one the app shows before an update; compare a server with this commit
+    cmds:
+      - go run . -asset-hash
+
+  build:crypto:
+    desc: Rebuild dist/assets/js/lib/crypto-bundle.js from the pinned versions (HPKE X25519, Ed25519)
+    dir: tools/crypto-bundle
+    cmds:
+      - npm ci --ignore-scripts
+      - npm run build
+
   update:
     desc: |
       This task will update the version number in the codebase

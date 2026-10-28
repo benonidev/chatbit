@@ -3,20 +3,20 @@
         <ul id="id_room_list"  class="listview image-listview flush transparent mt-3 mb-2">
         </ul>
     </div>
-    <!-- app footer -->
+    <!-- app footer: compact, one line plus the GitHub link -->
     <div class="appFooter homeFooter">
-
-        <div class="footer-title">
-
-            Copyright © Benoni GmbH <span class="yearNow"></span>. All Rights Reserved.
+        <div class="home-footer-brand">
+            <!-- logo per theme, switched by the CSS (.logo-for-dark / .logo-for-light) -->
+            <img src="assets/img/LogoBenoni.svg" alt="" class="home-footer-logo logo-for-dark">
+            <img src="assets/img/LogoBenoniLight.svg" alt="" class="home-footer-logo logo-for-light">
+            <span><strong>ChatBit</strong> · end-to-end encrypted</span>
         </div>
-        <!-- logo per theme, switched by the CSS (.logo-for-dark / .logo-for-light) -->
-        <img src="assets/img/LogoBenoni.svg" alt="icon" class="footer-logo mb-2 w100 logo-for-dark">
-        <img src="assets/img/LogoBenoniLight.svg" alt="icon" class="footer-logo mb-2 w100 logo-for-light">
-        <div> <span class="text-light">ChatBit</span> is AES 256 Bit encrypted chat.</div>
-         <br>
-        This project is OpenSource and free forever.
-
+        <div class="home-footer-meta">
+            <a href="https://github.com/benonich/chatbit" target="_blank" rel="noopener noreferrer">
+                <ion-icon name="logo-github"></ion-icon> Open source on GitHub
+            </a>
+            <a href="https://benoni.dev" target="_blank" rel="noopener noreferrer">© Benoni GmbH</a>
+        </div>
     </div>
     <!-- * app footer -->
 
@@ -117,7 +117,7 @@
                         <h4>Fill the form to add a new Chat Room</h4>
                     </div>
                     <div class="section mt-4 mb-5">
-                        <form id="in_new_room_submit" onsubmit="event.preventDefault();">
+                        <form id="in_new_room_submit">
                             <div class="form-group basic">
                                 <div class="input-wrapper">
                                     <label class="form-label" for="in_new_room_name">Room Name</label>
@@ -263,14 +263,14 @@
                 <div class="login-form">
                     <div class="section mt-2">
                         <h1>Profile</h1>
-                        <h4>Your alias is shown with every message you send</h4>
+                        <h4>Your alias for new rooms. In a room it is fixed when you create or join it — the other members see that name.</h4>
                     </div>
                     <div class="section mt-4 mb-5">
-                        <form onsubmit="event.preventDefault();">
+                        <form>
                             <div class="form-group basic">
                                 <div class="input-wrapper">
                                     <label class="form-label" for="in_settings_alias">Alias</label>
-                                    <input type="text" class="form-control" id="in_settings_alias" placeholder="Your alias">
+                                    <input type="text" class="form-control" id="in_settings_alias" placeholder="Your alias" maxlength="64">
                                     <i class="clear-input">
                                         <ion-icon name="close-circle"></ion-icon>
                                     </i>
@@ -324,7 +324,7 @@
                 </ul>
 
                 <div class="listview-title mt-2">Password</div>
-                <form class="section" onsubmit="event.preventDefault();">
+                <form class="section">
                     <div class="form-group basic">
                         <div class="input-wrapper">
                             <label class="form-label" for="in_settings_pw_current">Current password</label>
@@ -382,6 +382,10 @@
                         <li>
                             <div>Build</div>
                             <span class="text-muted" data-field="info_build"></span>
+                        </li>
+                        <li>
+                            <div>Hash</div>
+                            <span class="text-muted" data-field="info_hash"></span>
                         </li>
                         <li>
                             <div>Server</div>
@@ -454,3 +458,38 @@
     </div>
 </div>
 <!-- * Delete Everything -->
+
+<!-- Update: installed and available version before updating (ViewHome._checkUpdate) -->
+<div class="modal fade dialogbox" id="modal:home:update" tabindex="-1" style="display: none;">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" data-field="title">Update</h5>
+            </div>
+            <div class="modal-body update-info">
+                <div class="update-version">
+                    <div class="text-muted small">Installed</div>
+                    <div data-field="installed"></div>
+                </div>
+                <div class="update-version">
+                    <div class="text-muted small">Available on the server</div>
+                    <div data-field="available"></div>
+                </div>
+                <div class="small text-muted mt-2">
+                    The hash covers every file of the app. Compare it with the release on
+                    <a href="https://github.com/benonich/chatbit/releases" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    — the same hash means the server delivers exactly the published code.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="btn-list">
+                    <a href="#" class="btn btn-text-primary btn-block" data-bs-dismiss="modal" data-action="app:update_confirm" data-field="confirm">
+                        <ion-icon name="cloud-download-outline"></ion-icon> UPDATE NOW
+                    </a>
+                    <a href="#" class="btn btn-text-secondary btn-block" data-bs-dismiss="modal" data-field="cancel">CANCEL</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- * Update -->

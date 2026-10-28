@@ -3,6 +3,7 @@ package domain
 import (
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -28,9 +29,16 @@ type Room struct {
 	// TTL it is set once when the room is created; nil for rooms created before it was stored.
 	Store *bool `json:"store,omitempty"`
 
-	// Secret the join codes are derived from (see joincode.go), created with the room. Members
-	// get it with room_info.
+	// Current epoch (see rotation.go); 0 until the creator sent the first rotation
+	Epoch uint32 `json:"epoch,omitempty"`
+
+	// Join secret of the current epoch: the join codes are derived from it (see joincode.go). It
+	// is set by every rotation; members get it in their envelope, never from the server.
 	JoinSecret []byte `json:"joinSecret,omitempty"`
+
+	// New members that sent a join request with a valid invite code and wait for the approval.
+	// They get rotations, but no messages.
+	Pending []PendingPeer `json:"pending,omitempty"`
 
 	// Server time (ms) of the last clean. Members that were offline get the clean on their
 	// next join, if they were last connected before it.
@@ -50,30 +58,56 @@ type JoinRoom struct {
 	TTL   int64 `json:"ttl,omitempty"`
 	Store *bool `json:"store,omitempty"`
 
-	// Proof that the client may join (see joincode.go): members send their member code,
-	// new members the invite code of the QR code
+	// Last epoch the client knows and its member code from the join secret of that epoch (see
+	// joincode.go). An older epoch only gives the rotations since then (catch-up).
+	Epoch      uint32 `json:"epoch,omitempty"`
 	MemberCode string `json:"memberCode,omitempty"`
-	InviteCode string `json:"inviteCode,omitempty"`
+
+	// Server timestamp of the newest message the client got for this room: messages from then on
+	// are sent again (also the ones of that same millisecond). nil: JoinRooms.LastConnectionTime.
+	Since *uint64 `json:"since,omitempty"`
 }
 
-// RoomInfo is sent to the client after joining, so it knows the TTL that is in force.
+// RoomSynced follows the missed messages of a join: the client has every stored message up to
+// Until (server time) and can move its cursor of the room there.
+type RoomSynced struct {
+	ID    uuid.UUID `json:"id"`
+	Until uint64    `json:"until"`
+}
+
+// RoomInfo is sent to the client after joining, so it knows the TTL and epoch that are in force.
 type RoomInfo struct {
 	ID    uuid.UUID `json:"id"`
 	TTL   int64     `json:"ttl"`
 	Store *bool     `json:"store,omitempty"` // nil: not set yet, the client keeps its own setting
+	Epoch uint32    `json:"epoch"`
 
-	JoinSecret []byte `json:"joinSecret,omitempty"` // base64; the client derives its join codes from it
+	// The client waits for the approval of its join request (no messages until then)
+	Pending bool `json:"pending,omitempty"`
 }
 
-// JoinRejected tells the client that it may not join the room (no or no valid join code).
+// JoinRejected tells the client that it may not join the room. Reason "code": no valid join
+// code. Reason "declined": a member declined its join request. Reason "rotated": the code was
+// valid for an older epoch — Rotations are all rotations since then; the client applies them and
+// joins again with a code of the current epoch.
 type JoinRejected struct {
-	ID     uuid.UUID `json:"id"`
-	Reason string    `json:"reason"`
+	ID        uuid.UUID     `json:"id"`
+	Reason    string        `json:"reason"`
+	Rotations []RotationOut `json:"rotations,omitempty"`
 }
 
 type RoomPeer struct {
 	ID           uuid.UUID `json:"id,omitempty"`
 	Notification bool      `json:"notification,omitempty"`
+
+	// Epoch of the last join: only peers of the current epoch are members (IsMember). After a
+	// rotation everybody has to join again with a code of the new join secret.
+	Epoch uint32 `json:"epoch,omitempty"`
+}
+
+type PendingPeer struct {
+	ID    uuid.UUID `json:"id"`
+	Until int64     `json:"until"` // unix seconds
 }
 
 type LeaveRooms struct {
@@ -166,9 +200,42 @@ func (r *Room) HasPeer(peerID uuid.UUID) bool {
 	})
 }
 
+// IsMember reports whether the peer joined in the current epoch
+func (r *Room) IsMember(peerID uuid.UUID) bool {
+	return slices.ContainsFunc(r.Peers, func(peer RoomPeer) bool {
+		return peer.ID == peerID && peer.Epoch == r.Epoch
+	})
+}
+
+// AddPeer adds the peer as member of the current epoch (or updates it)
 func (r *Room) AddPeer(peerID uuid.UUID, notification bool) {
-	if !r.HasPeer(peerID) {
-		slog.Debug("add peer to room", slog.String("peer", peerID.String()), slog.String("room", r.ID.String()))
-		r.Peers = append(r.Peers, RoomPeer{ID: peerID, Notification: notification})
+	i := slices.IndexFunc(r.Peers, func(peer RoomPeer) bool { return peer.ID == peerID })
+	if i >= 0 {
+		r.Peers[i].Notification = notification
+		r.Peers[i].Epoch = r.Epoch
+		return
 	}
+
+	slog.Debug("add peer to room", slog.String("peer", peerID.String()), slog.String("room", r.ID.String()))
+	r.Peers = append(r.Peers, RoomPeer{ID: peerID, Notification: notification, Epoch: r.Epoch})
+}
+
+// IsPending reports whether the peer waits for the approval of its join request
+func (r *Room) IsPending(peerID uuid.UUID, now time.Time) bool {
+	return slices.ContainsFunc(r.Pending, func(p PendingPeer) bool {
+		return p.ID == peerID && p.Until > now.Unix()
+	})
+}
+
+// AddPending lets the peer wait for the approval until `until`; expired entries are removed
+func (r *Room) AddPending(peerID uuid.UUID, now, until time.Time) {
+	r.RemovePending(peerID, now)
+	r.Pending = append(r.Pending, PendingPeer{ID: peerID, Until: until.Unix()})
+}
+
+// RemovePending removes the peer and all expired entries
+func (r *Room) RemovePending(peerID uuid.UUID, now time.Time) {
+	r.Pending = slices.DeleteFunc(r.Pending, func(p PendingPeer) bool {
+		return p.ID == peerID || p.Until <= now.Unix()
+	})
 }

@@ -204,11 +204,24 @@ func (c *WsClient) readPump() {
 				continue
 			}
 
+			// Only members of the current epoch, with the key of the current epoch. A message that
+			// was on its way during a rotation is rejected — the client sends it again.
+			if !room.IsMember(c.UID) || msg.Epoch != room.Epoch {
+				slog.Debug("message rejected, not a member of the current epoch")
+				c.send <- NewWsOutboundMessage(domain.WsTypeMessageRejected, domain.MessageRejected{ID: msg.ID, RoomID: msg.RoomID, Reason: "epoch"})
+				continue
+			}
+
 			// The room TTL is the upper limit, a message may only be shorter. The server time is
 			// used as timestamp, so every client calculates the same expiry (the client clock may be wrong).
 			msg.TTL = room.MessageTTL(msg.TTL)
 			msg.Store = room.StoreMessages(msg.Store)
 			msg.TimeStamp = uint64(time.Now().UnixMilli())
+			// Newer than the last clean, also in the same millisecond: the clients delete
+			// everything up to the clean (e.g. the "cleared the chat" message that follows it)
+			if msg.TimeStamp <= room.CleanedAt {
+				msg.TimeStamp = room.CleanedAt + 1
+			}
 
 			message, err = marshalWs(domain.WsTypeMessage, msg)
 			if err != nil {
@@ -279,17 +292,19 @@ func (c *WsClient) readPump() {
 
 			for _, room := range leave.Rooms {
 				slog.Debug("peer will leave room", slog.String("room", room.String()), slog.String("peer", c.UID.String()))
+				// Not subscribed is normal (after a rotation, or a removed member) — the peer is
+				// removed from the room anyway, otherwise it would keep getting push notifications
 				err = c.psWsMsgAdapter.UnsubscribeFromTopic(room, c.UID)
 				if err != nil {
-					slog.Error("not possible to unsubscribe from topic", slog.String("error", err.Error()))
-					continue
+					slog.Debug("not subscribed to the room while leaving", slog.String("error", err.Error()))
 				}
 
 				roomEmpty := false
 
 				err = c.app.DB.Room.UpdateWithTTL(room[:], func(r *domain.Room) error {
 					r.RemovePeer(c.UID)
-					roomEmpty = len(r.Peers) == 0
+					r.RemovePending(c.UID, time.Now())
+					roomEmpty = len(r.Peers) == 0 && len(r.Pending) == 0
 
 					return nil
 				}, c.limits.RoomStoreTTL)
@@ -315,9 +330,6 @@ func (c *WsClient) readPump() {
 				continue
 			}
 
-			var allMs []domain.Message
-			var msgSend []byte
-
 			// One frame with thousands of rooms would keep the server busy
 			if len(join.Rooms) > c.limits.cfg.MaxRoomsPerJoin {
 				slog.Warn("too many rooms in one join, cut", slog.Int("rooms", len(join.Rooms)))
@@ -325,103 +337,7 @@ func (c *WsClient) readPump() {
 			}
 
 			for _, room := range join.Rooms {
-				var roomTTL int64
-				var roomStore *bool
-				var cleanedAt uint64
-				var joinSecret []byte
-				err = c.app.DB.Room.UpdateWithTTL(room.ID[:], func(r *domain.Room) error {
-					if !c.allowJoin(r, room) {
-						return domain.ErrJoinRejected
-					}
-
-					r.AddPeer(c.UID, room.Notification)
-					joinSecret = r.JoinSecret
-					// Rooms created before the TTL / store setting was stored get it once from the first join
-					roomTTL = r.SetTTLOnce(room.TTL)
-					roomStore = r.SetStoreOnce(room.Store)
-					cleanedAt = r.CleanedAt
-					return nil
-				}, c.limits.RoomStoreTTL)
-				if errors.Is(err, domain.ErrObjNotFound) {
-					// A join of an unknown id creates the room — limited per IP, so nobody can
-					// fill the database with made up rooms
-					if !c.limits.AllowRoomCreate(c.ip) {
-						slog.Warn("room creation limit reached")
-						continue
-					}
-
-					slog.Debug("peer will create new room", slog.String("room", room.ID.String()), slog.String("peer", c.UID.String()))
-					r := &domain.Room{
-						ID: room.ID,
-						Peers: []domain.RoomPeer{
-							{
-								ID:           c.UID,
-								Notification: room.Notification,
-							},
-						},
-					}
-					roomTTL = r.SetTTLOnce(room.TTL)
-					roomStore = r.SetStoreOnce(room.Store)
-					joinSecret = r.EnsureJoinSecret()
-					err = c.app.DB.Room.AddWithTTL(r, c.limits.RoomStoreTTL(r))
-				}
-				if errors.Is(err, domain.ErrJoinRejected) {
-					slog.Debug("join rejected, no valid join code", slog.String("room", room.ID.String()), slog.String("peer", c.UID.String()))
-					c.send <- NewWsOutboundMessage(domain.WsTypeJoinRejected, domain.JoinRejected{ID: room.ID, Reason: "code"})
-					continue
-				}
-				if err != nil {
-					slog.Error("not possible to update room", slog.String("error", err.Error()))
-					continue
-				}
-
-				err = c.psWsMsgAdapter.AddSubscriberToTopic(room.ID, c.UID)
-				if err != nil && !errors.Is(err, pubsub.ErrAlreadyExist) {
-					slog.Error("not possible subscribe to room", slog.String("error", err.Error()))
-					continue
-				}
-
-				// Tell the client which TTL and store setting are in force (they may differ from what it sent)
-				msgSend, err = marshalWs(domain.WsTypeRoomInfo, domain.RoomInfo{ID: room.ID, TTL: roomTTL, Store: roomStore, JoinSecret: joinSecret})
-				if err != nil {
-					slog.Error("not possible to marshal room info", slog.String("error", err.Error()))
-				} else {
-					c.send <- WsOutbound{MsgType: websocket.TextMessage, Data: msgSend}
-				}
-
-				// The room was cleaned while the client was offline — sent before the newer messages
-				if cleanedAt > join.LastConnectionTime {
-					c.send <- NewWsOutboundMessage(domain.WsTypeCleanRoom, domain.CleanRoom{ID: room.ID, Timestamp: cleanedAt})
-				}
-
-				allMs, err = c.app.DB.Message.GetAllSinceTimeStamp(room.ID, join.LastConnectionTime)
-				if err != nil {
-					slog.Error("not possible to get all messages since", slog.String("error", err.Error()))
-					continue
-				}
-
-				for _, m := range allMs {
-					msgSend, err = json.Marshal(m)
-					if err != nil {
-						slog.Error("not possible to marshal Message", slog.String("error", err.Error()))
-						continue
-					}
-
-					wsMsgSend := domain.WsMessage{
-						Type: string(domain.WsTypeMessage),
-						Data: msgSend,
-					}
-
-					msgSend, err = json.Marshal(wsMsgSend)
-					if err != nil {
-						slog.Error("not possible to marshal WsMessage", slog.String("error", err.Error()))
-						continue
-					}
-
-					slog.Debug("message sent", slog.String("UID", c.UID.String()), slog.String("roomID", room.ID.String()), slog.String("msgID:", m.ID.String()))
-
-					c.send <- WsOutbound{MsgType: websocket.TextMessage, Data: msgSend}
-				}
+				c.joinRoom(room, join.LastConnectionTime)
 			}
 		case domain.WsTypeCreateRoom:
 			room, ok := unmarshalWs[domain.Room](wsMsg.Data)
@@ -444,8 +360,9 @@ func (c *WsClient) readPump() {
 			room.TTL = domain.ClampTTL(room.TTL)
 			room.Peers = []domain.RoomPeer{{ID: c.UID}}
 			room.CleanedAt = 0
-			room.JoinSecret = nil // never from the client
-			room.EnsureJoinSecret()
+			room.Epoch = 0        // the creator sends the first rotation
+			room.JoinSecret = nil // only from rotations
+			room.Pending = nil
 
 			err = c.app.DB.Room.AddWithTTL(&room, c.limits.RoomStoreTTL(&room))
 			if err != nil {
@@ -453,6 +370,34 @@ func (c *WsClient) readPump() {
 				continue
 			}
 
+		case domain.WsTypeRotate:
+			rot, ok := unmarshalWs[domain.Rotate](wsMsg.Data)
+			if !ok {
+				continue
+			}
+
+			c.rotate(rot)
+		case domain.WsTypeJoinRequest:
+			req, ok := unmarshalWs[domain.JoinRequest](wsMsg.Data)
+			if !ok {
+				continue
+			}
+
+			c.joinRequest(req)
+		case domain.WsTypeAnswerRequest:
+			answer, ok := unmarshalWs[domain.AnswerRequest](wsMsg.Data)
+			if !ok {
+				continue
+			}
+
+			c.answerRequest(answer)
+		case domain.WsTypeKeyUpdate:
+			update, ok := unmarshalWs[domain.KeyUpdate](wsMsg.Data)
+			if !ok {
+				continue
+			}
+
+			c.keyUpdate(update)
 		case domain.WsTypeSubscribePush:
 			push, ok := unmarshalWs[domain.Push](wsMsg.Data)
 			if !ok {
@@ -585,21 +530,6 @@ func marshalWs(msgType domain.WsMessageType, data any) ([]byte, error) {
 	return json.Marshal(domain.WsMessage{Type: string(msgType), Data: raw})
 }
 
-// allowJoin reports whether the client may join the existing room r: with a member code or an
-// invite code. Every code is valid once.
-func (c *WsClient) allowJoin(r *domain.Room, join domain.JoinRoom) bool {
-	now := time.Now()
-
-	switch {
-	case join.MemberCode != "" && r.ValidMemberCode(join.MemberCode, c.UID, now):
-		return c.useJoinCode(r.ID, join.MemberCode)
-	case join.InviteCode != "" && r.ValidInviteCode(join.InviteCode, now):
-		return c.useJoinCode(r.ID, join.InviteCode)
-	}
-
-	return false
-}
-
 // useJoinCode marks the code as used. Returns false if it was used before.
 func (c *WsClient) useJoinCode(roomID uuid.UUID, code string) bool {
 	err := c.app.DB.UsedCode.InsertWithTTL(domain.NewUsedJoinCode(roomID, code), int64(domain.JoinCodeLifetime.Seconds()))
@@ -621,7 +551,7 @@ func (c *WsClient) cleanRoom(roomID uuid.UUID) {
 	cleanedAt := uint64(time.Now().UnixMilli())
 
 	err := c.app.DB.Room.UpdateWithTTL(roomID[:], func(r *domain.Room) error {
-		if !r.HasPeer(c.UID) {
+		if !r.IsMember(c.UID) {
 			return domain.ErrNotMember
 		}
 
@@ -669,6 +599,7 @@ func (c *WsClient) deleteRoomIfUnused(roomID uuid.UUID) {
 	}
 
 	c.deleteRoomContent(roomID)
+	c.deleteRoomKeys(roomID)
 }
 
 // deleteRoomContent deletes all stored messages and uploaded files of the room.
@@ -681,6 +612,16 @@ func (c *WsClient) deleteRoomContent(roomID uuid.UUID) {
 	err = os.RemoveAll(filepath.Join(domain.FileDir, roomID.String()))
 	if err != nil {
 		slog.Error("not possible to delete files of room", slog.String("error", err.Error()))
+	}
+}
+
+// deleteRoomKeys deletes the rotation log, join requests and key updates of a deleted room
+func (c *WsClient) deleteRoomKeys(roomID uuid.UUID) {
+	for _, del := range []func(uuid.UUID) error{c.app.DB.Rotation.DeleteAll, c.app.DB.JoinRequest.DeleteAll, c.app.DB.KeyUpdate.DeleteAll} {
+		err := del(roomID)
+		if err != nil {
+			slog.Error("not possible to delete room keys", slog.String("error", err.Error()))
+		}
 	}
 }
 
@@ -747,7 +688,8 @@ func (c *WsClient) allowFrame(msgType domain.WsMessageType) bool {
 	case domain.WsTypeMessage:
 		ok = c.connLimits.messages.allow(now, cfg.MessagesPerSecond, float64(cfg.MessageBurst), 1) &&
 			c.limits.AllowMessageIP(c.ip)
-	case domain.WsTypeJoinRoom, domain.WsTypeCreateRoom, domain.WsTypeLeaveRoom, domain.WsTypeCleanRoom, domain.WsTypeSubscribePush:
+	case domain.WsTypeJoinRoom, domain.WsTypeCreateRoom, domain.WsTypeLeaveRoom, domain.WsTypeCleanRoom, domain.WsTypeSubscribePush,
+		domain.WsTypeRotate, domain.WsTypeJoinRequest, domain.WsTypeKeyUpdate, domain.WsTypeAnswerRequest:
 		ok = c.connLimits.joins.allow(now, cfg.JoinsPerSecond, cfg.JoinsPerSecond*5, 1)
 	}
 

@@ -20,6 +20,13 @@ var ASSETS_TO_CACHE = [
   'assets/css/inc/bootstrap/fonts/bootstrap-icons.woff',
   'assets/css/inc/bootstrap/fonts/bootstrap-icons.woff2',
   'assets/css/inc/splide/splide.min.css',
+  'assets/css/inc/inter/inter.css',
+  'assets/css/inc/inter/inter-latin-400-normal.woff2',
+  'assets/css/inc/inter/inter-latin-ext-400-normal.woff2',
+  'assets/css/inc/inter/inter-latin-500-normal.woff2',
+  'assets/css/inc/inter/inter-latin-ext-500-normal.woff2',
+  'assets/css/inc/inter/inter-latin-700-normal.woff2',
+  'assets/css/inc/inter/inter-latin-ext-700-normal.woff2',
   'assets/js/lib/jquery-3.7.0.min.js',
   'assets/js/lib/dexie.min.js',
   'assets/js/lib/qrcode.min.js',
@@ -40,6 +47,7 @@ var ASSETS_TO_CACHE = [
   'assets/js/adapter/invite.js',
   'assets/js/adapter/join_code.js',
   'assets/js/adapter/key_store.js',
+  'assets/js/adapter/log.js',
   'assets/js/adapter/logoff.js',
   'assets/js/adapter/modal.js',
   'assets/js/adapter/notification.js',
@@ -49,6 +57,10 @@ var ASSETS_TO_CACHE = [
   'assets/js/adapter/view_home.js',
   'assets/js/adapter/view_lock.js',
   'assets/js/adapter/view_room.js',
+  'assets/js/adapter/view_approval.js',
+  'assets/js/adapter/room_crypto.js',
+  'assets/js/adapter/room_keys.js',
+  'assets/js/lib/crypto-bundle.js',
   'assets/js/adapter/websocket.js',
   'assets/js/domain/file.js',
   'assets/js/domain/message.js',
@@ -66,7 +78,7 @@ var ASSETS_TO_CACHE = [
   'assets/img/LogoBenoniLight.svg'
 ];
 
-const IGNORED_PATHS = ['/api/', '/ws/'];
+const IGNORED_PATHS = ['/api/', '/ws/', '/version.json']; // version.json: always the one of the server
 
 const IS_LOCALHOST =
     self.location.hostname === 'localhost' ||
@@ -187,14 +199,10 @@ self.addEventListener('push', (event) => {
     // PushData keys structure standart https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/showNotification
     let pushData = event.data.json();
     if (!pushData || !pushData.title) {
-        console.error('Received WebPush with an empty title. Received body: ', pushData);
+        console.warn('[sw] push without title');
     }
     self.registration.showNotification(pushData.title, pushData)
         .then(() => {
-            console.log("Push received title: ", pushData.title);
-
-
-
             // You can save to your analytics fact that push was shown
             // fetch('https://your_backend_server.com/track_show?message_id=' + pushData.data.message_id);
         });
@@ -204,17 +212,16 @@ self.addEventListener('notificationclick', function (event) {
     event.notification.close();
 
     if (!event.notification.data) {
-        console.error('Click on WebPush with empty data, where url should be. Notification: ', event.notification)
+        console.warn('[sw] notification click without data')
         return;
     }
     if (!event.notification.data.url) {
-        console.error('Click on WebPush without url. Notification: ', event.notification)
+        console.warn('[sw] notification click without url')
         return;
     }
 
     clients.openWindow(event.notification.data.url)
         .then(() => {
-            console.log("Notification was clicked: ", event.notification);
             // You can send fetch request to your analytics API fact that push was clicked
             // fetch('https://your_backend_server.com/track_click?message_id=' + pushData.data.message_id);
         });
@@ -261,10 +268,6 @@ self.addEventListener('notificationclick', event => {
 
 
 self.addEventListener("push", (event) => {
-
-    console.log("Push received");
-    console.log(event.data?.json());
-
 
     //let data = { title: "Push", body: "New message", url: "/" };
     //try { if (event.data) data = { ...data, ...event.data.json() }; } catch { console.error("Push data is not valid JSON")}

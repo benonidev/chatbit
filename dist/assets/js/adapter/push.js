@@ -1,4 +1,7 @@
 import {Events} from "./event.js";
+import {logger} from "./log.js";
+
+const log = logger("push");
 
 // Web push: once the WebSocket is ready it asks for notification permission, subscribes
 // with the server VAPID key and sends the subscription to the server (Events.WS.SUBSCRIBE_PUSH).
@@ -14,28 +17,25 @@ export class Push {
     }
 
     async subscribe(){
-        console.log('subscribe push notifications');
-
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-            console.warn('Push not supported');
+            log.info("push is not supported by this browser");
             return;
         }
 
         let permission = await Notification.requestPermission();
 
         if (permission !== 'granted') {
-            console.warn('Notification permission denied');
             permission = Notification.permission;
         }
 
         if (permission !== 'granted') {
-            console.warn('Notification permission denied');
+            log.info("notification permission denied");
             return;
         }
 
         let swRegistration = await navigator.serviceWorker.getRegistration();
         if (!swRegistration) {
-            console.warn('No service worker registration found');
+            log.warn("no service worker registration found");
             return;
         }
         let pushManager = swRegistration.pushManager;
@@ -54,10 +54,11 @@ export class Push {
             this._events.emit(Events.WS.SUBSCRIBE_PUSH, {endpoint: subscription.endpoint,
                 p256dh: this.arrayBufferToBase64url(subscription.getKey('p256dh')),
                 auth: this.arrayBufferToBase64url(subscription.getKey('auth'))})
+            log.info("subscribed");
 
             // Here you can send fetch request with subscription data to your backend API for next push sends from there
         } catch (error) {
-            console.warn('Some error occurred, unable to subscribe: ', error);
+            log.warn("subscribing failed:", error);
         }
     }
 
@@ -75,7 +76,7 @@ export class Push {
         });
 
         await subscription.unsubscribe();
-        console.log('Unsubscribed');
+        log.info("unsubscribed");
     }
 
     arrayBufferToBase64url(buffer) {

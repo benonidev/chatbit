@@ -1,3 +1,7 @@
+import {logger} from "./log.js";
+
+const log = logger("event");
+
 // Minimal publish/subscribe bus — all adapters and views talk to each other only through it.
 // Event names are defined in Events below.
 export class EventBus {
@@ -11,7 +15,7 @@ export class EventBus {
     }
 
     emit(event, data) {
-        console.log("Emit event " + event + " with data " + data);
+        log.debug("emit", event); // never the data: it can be message text or a password form
         this._listeners[event]?.forEach(cb => cb(data));
     }
 
@@ -35,8 +39,22 @@ export const Events = {
         CLEAN_ROOM: 'ws:clean_room', // body: room id — deletes the messages and files of the room on the server and on all members
         ROOM_CLEANED: 'ws:room_cleaned', // body: {id, timestamp} — another member cleaned the room
         SUBSCRIBE_PUSH: 'ws:subscribe_push',
-        ROOM_INFO: 'ws:room_info', // body: {id, ttl, store, joinSecret} — the TTL and store setting the server enforces for the room
-        JOIN_REJECTED: 'ws:join_rejected', // body: {id, reason} — the join code was missing, wrong, expired or used
+        ROOM_SYNCED: 'ws:room_synced', // body: {id, until} — all stored messages of a join are sent, up to until (server time)
+        JOINING: 'ws:joining',         // body: [room id] — join_rooms is sent, the rooms are not synced until room_synced
+        ROOM_INFO: 'ws:room_info', // body: {id, ttl, store, epoch, pending} — what the server enforces for the room after a join
+        JOIN_REJECTED: 'ws:join_rejected', // body: {id, reason, rotations?} — "code": no valid join code; "declined": join request declined; "rotated": catch up with the rotations
+
+        // Room keys with epochs (room_keys.js, docs/room-keys.md)
+        SEND_ROTATE: 'ws:send_rotate',             // body: {roomId, epoch, joinSecret, body}
+        SEND_JOIN_REQUEST: 'ws:send_join_request', // body: {roomId, inviteCode, request}
+        SEND_KEY_UPDATE: 'ws:send_key_update',     // body: {roomId, epoch, update}
+        SEND_ANSWER_REQUEST: 'ws:send_answer_request', // body: {roomId, request, approved}
+        ROTATION: 'ws:rotation',                   // body: {roomId, epoch, body} — accepted rotation
+        ROTATE_REJECTED: 'ws:rotate_rejected',     // body: {roomId, epoch, current}
+        REJOIN_REQUIRED: 'ws:rejoin_required',     // body: {roomId, epoch}
+        JOIN_REQUEST: 'ws:join_request',           // body: {roomId, request} — a new member asks to join
+        KEY_UPDATE: 'ws:key_update',               // body: {roomId, epoch, update}
+        MESSAGE_REJECTED: 'ws:message_rejected',   // body: {id, roomId, reason}
         CONNECTED: 'ws:connected', // emitted after every (re)connect, once all rooms are joined again
         READY: 'ws:ready' // emitted once after the first successful connection
     },
@@ -48,6 +66,10 @@ export const Events = {
 
         OPEN_IMAGE: 'chat:open_image',
         SEND_DOCUMENT: 'chat:send_document', // body: the file input (data-change)
+        PICK_FILE: 'chat:pick_file',         // body: id of the file input to open
+        REPLY: 'chat:reply',                 // body: id of the message to answer
+        CANCEL_REPLY: 'chat:cancel_reply',
+        JUMP_TO: 'chat:jump_to',             // body: message id — scrolls to the quoted message
         OPEN_FILE: 'chat:open_file',         // body: message id — downloads the document
         SHARE_IMAGE: 'chat:share_image', // shares the image open in the image modal
 
@@ -66,6 +88,7 @@ export const Events = {
         MESSAGE_STORED: 'chat:message_stored',     // body: Message — a received message was saved in the database
         MESSAGES_EXPIRED: 'chat:messages_expired', // body: [{id, roomId}] removed from the database
         TICK: 'chat:tick',                         // every minute — update the remaining times
+        SYSTEM_MESSAGE: 'chat:system_message',     // body: Message — "Alice added Dave", stored locally
     },
     ROOM: {
         NEW_ROOM: 'room:new_room',
@@ -74,7 +97,20 @@ export const Events = {
         JOIN_ROOM: 'room:join_room', // no body read from modal
         EDIT_ROOM: 'room:edit_room', // todo
         LEAVE_ROOM: 'room:leave_room', // todo
-        OPEN_ROOM: 'room:open_room' // body: room_id
+        OPEN_ROOM: 'room:open_room', // body: room_id
+
+        // Room keys (room_keys.js)
+        READY: 'room:ready',               // body: {roomId, epoch} — joined the current epoch, messages can be sent
+        ROTATED: 'room:rotated',           // body: {roomId, epoch} — new epoch applied (member list may have changed)
+        CHANGED: 'room:changed',           // body: room id — status changed (approved, removed, deleted)
+        JOIN_REQUEST: 'room:join_request', // body: {roomId, roomName, entry, fingerprint, request} — approve it?
+        APPROVE: 'room:approve',           // body: {roomId, entry, request}
+        DECLINE: 'room:decline',           // body: {roomId, request}
+        SHOW_MEMBERS: 'room:show_members', // opens the member list of the open room
+        SHOW_HISTORY: 'room:show_history', // opens the key history (all epochs) of the open room
+        SHOW_SECURITY: 'room:show_security', // opens the security page of the open room (header chip)
+        SECURITY_GOTO: 'room:security_goto', // body: "members" | "history" — from the security page
+        REMOVE_MEMBER: 'room:remove_member', // body: member id (button in the member list)
     },
     // This is the event to prepare the content of the page
     STATE: {
@@ -102,7 +138,13 @@ export const Events = {
         DELETE_ALL: 'settings:delete_all',           // leaves all rooms and deletes every local data
     },
     APP: {
-        UPDATE: 'app:update', // checks for a new service worker version and reloads with it
+        UPDATE: 'app:update', // shows the installed and the available version (dialog)
+        UPDATE_CONFIRM: 'app:update_confirm', // loads the new service worker version and reloads with it
+        REGISTER: 'app:register', // body: the login form (data-submit)
+    },
+    LOCK: {
+        UNLOCK: 'lock:unlock', // body: the lock screen form (data-submit)
+        CLEAR: 'lock:clear',   // deletes the local database
     },
     // CHANGE.PAGE will just load the Html Pages
     MODAL: {
