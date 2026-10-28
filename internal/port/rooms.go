@@ -244,7 +244,7 @@ func (c *WsClient) rotate(rot domain.Rotate) {
 
 	var current uint32
 	var room domain.Room
-	stored := domain.Rotation{RoomID: rot.RoomID, Epoch: rot.Epoch, JoinSecret: rot.JoinSecret, Body: rot.Body}
+	stored := domain.Rotation(rot)
 
 	err := c.app.DB.Room.UpdateWithTTL(rot.RoomID[:], func(r *domain.Room) error {
 		current = r.Epoch
